@@ -331,29 +331,40 @@ async function handleUserState(chatId, userId, text) {
 // Обновить конфигурацию сервера
 async function updateServerConfig(chatId) {
   try {
-    // Сохраняем конфигурацию в JSON файл
+    // Сохраняем конфигурацию в JSON файл локально
     saveClientsConfig();
     
     let reloadResult = null;
     
-    // Пытаемся автоматически уведомить прокси сервер (если URL указан)
+    // Отправляем конфигурацию на прокси сервер
     if (PROXY_SERVER_URL) {
       try {
         const fetch = (await import('node-fetch')).default;
-        const response = await fetch(`${PROXY_SERVER_URL}/reload-config`, {
+        const response = await fetch(`${PROXY_SERVER_URL}/update-config`, {
           method: 'POST',
-          timeout: 5000
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            clients: clientsConfig
+          }),
+          timeout: 10000
         });
-        reloadResult = await response.json();
-        console.log('✅ Proxy server auto-reload successful:', reloadResult);
+        
+        if (response.ok) {
+          reloadResult = await response.json();
+          console.log('✅ Proxy server config updated:', reloadResult);
+        } else {
+          throw new Error(`HTTP ${response.status}`);
+        }
       } catch (err) {
-        console.log('⚠️ Auto-reload failed (but config saved):', err.message);
+        console.log('⚠️ Failed to update proxy server:', err.message);
       }
     }
     
     const message = reloadResult 
-      ? `✅ *Конфигурация обновлена!*\n\n📊 Клиентов: ${Object.keys(clientsConfig).length}\n🔄 *Автоматическая перезагрузка выполнена*\n\n💡 Изменения применены мгновенно!`
-      : `✅ *Конфигурация сохранена!*\n\n📊 Клиентов: ${Object.keys(clientsConfig).length}\n📁 Файл: clients-config.json\n\n${PROXY_SERVER_URL ? '⚠️ Автоматическая перезагрузка не удалась' : '💡 Прокси сервер автоматически подхватит изменения'}`;
+      ? `✅ *Конфигурация обновлена!*\n\n📊 Клиентов: ${Object.keys(clientsConfig).length}\n🔄 *Прокси сервер обновлен*\n\n💡 Изменения применены мгновенно!`
+      : `✅ *Конфигурация сохранена!*\n\n📊 Клиентов: ${Object.keys(clientsConfig).length}\n📁 Файл: clients-config.json\n\n${PROXY_SERVER_URL ? '⚠️ Не удалось обновить прокси сервер' : '💡 Прокси сервер URL не указан'}`;
     
     bot.sendMessage(chatId, message, {
       parse_mode: 'Markdown',
