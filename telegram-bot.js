@@ -1,4 +1,4 @@
-// ✅ ИСПРАВЛЕННЫЙ код с Basic Auth для прокси сервера
+// ✅ ОБНОВЛЕННЫЙ код с поддержкой удаления клиентов через API
 const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
 const fs = require('fs');
@@ -119,19 +119,13 @@ function hasAccess(userId) {
   const userIdNum = parseInt(userId);
   const superAdminNum = parseInt(SUPER_ADMIN_ID);
   
-  console.log(`🔍 Проверка доступа для ID: ${userIdNum}`);
-  console.log(`🔑 Супер админ: ${superAdminNum}`);
-  console.log(`👥 Менеджеры: ${MANAGER_IDS.join(', ')}`);
-  
   // Проверяем супер админа
   if (userIdNum === superAdminNum) {
-    console.log(`✅ Супер админ подтвержден`);
     return true;
   }
   
   // Проверяем менеджеров
   const isManagerResult = MANAGER_IDS.includes(userIdNum);
-  console.log(`${isManagerResult ? '✅' : '❌'} Менеджер: ${isManagerResult}`);
   
   return isManagerResult;
 }
@@ -169,6 +163,34 @@ function parseProxyFormat(proxyLine) {
     return `http://${username}:${password}@${ip}:${port}`;
   }
   return null;
+}
+
+// ✅ ДОБАВЛЕНО: Функция для удаления клиента с прокси сервера
+async function deleteClientFromProxyServer(clientName) {
+  if (!PROXY_SERVER_URL) {
+    console.log('⚠️ PROXY_SERVER_URL не указан, пропускаем удаление с сервера');
+    return false;
+  }
+
+  try {
+    const axios = require('axios');
+    
+    // Пытаемся удалить клиента через API
+    const response = await axios.delete(`${PROXY_SERVER_URL}/api/delete-client/${clientName}`, {
+      auth: API_AUTH,
+      timeout: 10000
+    });
+    
+    console.log(`✅ Client ${clientName} deleted from proxy server`);
+    return true;
+  } catch (err) {
+    if (err.response?.status === 404) {
+      console.log(`⚠️ Client ${clientName} not found on proxy server (already deleted)`);
+      return true; // Считаем успехом, если клиента уже нет
+    }
+    console.log(`⚠️ Failed to delete client ${clientName} from proxy server: ${err.message}`);
+    return false;
+  }
 }
 
 // Главное меню с учетом роли
@@ -476,11 +498,20 @@ async function handleUserState(chatId, userId, text) {
       }
 
       const clientToDelete = clientsConfig[text];
+      
+      // ✅ ИСПРАВЛЕНО: Удаляем клиента с прокси сервера ПЕРЕД удалением из конфигурации
+      const deletedFromServer = await deleteClientFromProxyServer(text);
+      
+      // Удаляем из локальной конфигурации
       delete clientsConfig[text];
       saveClientsConfig();
       delete userStates[userId];
 
-      bot.sendMessage(chatId, `✅ *Клиент удален!*\n\n👤 Имя: *${text}*\n🌐 Удалено прокси: ${clientToDelete.proxies.length} шт.\n\n💡 Нажмите "🔄 Обновить сервер" для применения изменений!`, {
+      const serverStatus = deletedFromServer ? 
+        '🔄 *Удален с прокси сервера*' : 
+        '⚠️ *Не удалось удалить с прокси сервера*';
+
+      bot.sendMessage(chatId, `✅ *Клиент удален!*\n\n👤 Имя: *${text}*\n🌐 Удалено прокси: ${clientToDelete.proxies.length} шт.\n${serverStatus}\n\n💡 Изменения применены мгновенно!`, {
         parse_mode: 'Markdown',
         ...getMainMenu(userId)
       });
