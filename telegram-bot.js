@@ -1,6 +1,11 @@
+const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
 const fs = require('fs');
 const path = require('path');
+
+// Express сервер для Railway
+const app = express();
+const PORT = process.env.PORT || 8080;
 
 // Токен бота (получите у @BotFather)
 const BOT_TOKEN = process.env.BOT_TOKEN || 'YOUR_BOT_TOKEN_HERE';
@@ -13,6 +18,31 @@ const PROXY_SERVER_URL = process.env.PROXY_SERVER_URL || '';
 
 // Путь к файлу конфигурации клиентов
 const CLIENTS_CONFIG_PATH = './clients-config.json';
+
+// Middleware для Express
+app.use(express.json());
+
+// Health check для Railway
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'running',
+    service: 'telegram-bot',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.get('/status', (req, res) => {
+  res.json({
+    status: 'running',
+    service: 'telegram-bot',
+    bot_username: bot ? (bot.options.username || 'unknown') : 'not_initialized',
+    clients_count: Object.keys(clientsConfig).length,
+    proxy_server_url: PROXY_SERVER_URL,
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString()
+  });
+});
 
 // Создаем бота
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
@@ -53,12 +83,12 @@ function isAdmin(userId) {
 // Состояние пользователей для многошагового ввода
 const userStates = {};
 
-// Функция для конвертации прокси из формата ip:port:user:pass в http://user:pass@ip:port
-function convertProxyFormat(proxyLine) {
+// Функция для конвертации прокси из формата ip:port:user:pass в объект
+function parseProxyFormat(proxyLine) {
   const parts = proxyLine.trim().split(':');
   if (parts.length === 4) {
     const [ip, port, username, password] = parts;
-    return `http://${username}:${password}@${ip}:${port}`;
+    return `${ip}:${port}:${username}:${password}`;
   }
   return null;
 }
@@ -276,9 +306,9 @@ async function handleUserState(chatId, userId, text) {
       const invalidProxies = [];
 
       proxyLines.forEach((line, index) => {
-        const convertedProxy = convertProxyFormat(line);
-        if (convertedProxy) {
-          proxies.push(convertedProxy);
+        const parsedProxy = parseProxyFormat(line);
+        if (parsedProxy) {
+          proxies.push(parsedProxy);
         } else {
           invalidProxies.push(`Строка ${index + 1}: ${line}`);
         }
@@ -429,13 +459,17 @@ async function showHelp(chatId) {
   });
 }
 
-// Инициализация
-loadClientsConfig();
-
-console.log('🤖 Telegram Bot запущен!');
-console.log(`👥 Администраторы: ${ADMIN_IDS.join(', ')}`);
-console.log(`📁 Файл конфигурации: ${CLIENTS_CONFIG_PATH}`);
-console.log(`🌐 Прокси сервер URL: ${PROXY_SERVER_URL || 'не указан'}`);
+// Запуск HTTP сервера для Railway
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🌐 HTTP server running on port ${PORT}`);
+  console.log('🤖 Telegram Bot запущен!');
+  console.log(`👥 Администраторы: ${ADMIN_IDS.join(', ')}`);
+  console.log(`📁 Файл конфигурации: ${CLIENTS_CONFIG_PATH}`);
+  console.log(`🌐 Прокси сервер URL: ${PROXY_SERVER_URL || 'не указан'}`);
+  
+  // Инициализация
+  loadClientsConfig();
+});
 
 // Обработка ошибок
 bot.on('error', (error) => {
