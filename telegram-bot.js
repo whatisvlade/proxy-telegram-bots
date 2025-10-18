@@ -10,10 +10,15 @@ const PORT = process.env.PORT || 8080;
 // Токен бота (получите у @BotFather)
 const BOT_TOKEN = process.env.BOT_TOKEN || 'YOUR_BOT_TOKEN_HERE';
 
-// ID администраторов (замените на ваши Telegram ID)
-const ADMIN_IDS = process.env.ADMIN_IDS ? process.env.ADMIN_IDS.split(',').map(id => parseInt(id)) : [5361349487];
+// ID супер-администратора (видит всех клиентов)
+const SUPER_ADMIN_ID = parseInt(process.env.SUPER_ADMIN_ID) || 5361349487;
 
-// URL прокси сервера для автоматического обновления (опционально)
+// ID менеджеров (каждый видит только своих клиентов)
+const MANAGER_IDS = process.env.MANAGER_IDS ? 
+  process.env.MANAGER_IDS.split(',').map(id => parseInt(id)) : 
+  [5361349487];
+
+// URL прокси сервера для автоматического обновления
 const PROXY_SERVER_URL = process.env.PROXY_SERVER_URL || '';
 
 // Путь к файлу конфигурации клиентов
@@ -38,6 +43,8 @@ app.get('/status', (req, res) => {
     service: 'telegram-bot',
     bot_username: bot ? (bot.options.username || 'unknown') : 'not_initialized',
     clients_count: Object.keys(clientsConfig).length,
+    managers_count: MANAGER_IDS.length,
+    super_admin: SUPER_ADMIN_ID,
     proxy_server_url: PROXY_SERVER_URL,
     uptime: process.uptime(),
     timestamp: new Date().toISOString()
@@ -55,6 +62,22 @@ function loadClientsConfig() {
     if (fs.existsSync(CLIENTS_CONFIG_PATH)) {
       const data = fs.readFileSync(CLIENTS_CONFIG_PATH, 'utf8');
       clientsConfig = JSON.parse(data);
+      
+      // Миграция старых данных (добавляем manager_id если его нет)
+      let needsSave = false;
+      Object.keys(clientsConfig).forEach(clientName => {
+        if (!clientsConfig[clientName].manager_id) {
+          clientsConfig[clientName].manager_id = SUPER_ADMIN_ID;
+          clientsConfig[clientName].created_at = new Date().toISOString();
+          needsSave = true;
+        }
+      });
+      
+      if (needsSave) {
+        saveClientsConfig();
+        console.log('🔄 Миграция данных завершена');
+      }
+      
       console.log('✅ Конфигурация клиентов загружена');
     } else {
       console.log('📝 Создаем новый файл конфигурации');
@@ -75,15 +98,45 @@ function saveClientsConfig() {
   }
 }
 
-// Проверка прав администратора
-function isAdmin(userId) {
-  return ADMIN_IDS.includes(userId);
+// Проверка ролей
+function isSuperAdmin(userId) {
+  return userId === SUPER_ADMIN_ID;
+}
+
+function isManager(userId) {
+  return MANAGER_IDS.includes(userId);
+}
+
+function hasAccess(userId) {
+  return isManager(userId);
+}
+
+// Получить клиентов менеджера
+function getManagerClients(managerId) {
+  if (isSuperAdmin(managerId)) {
+    return clientsConfig; // Супер-админ видит всех
+  }
+  
+  const managerClients = {};
+  Object.keys(clientsConfig).forEach(clientName => {
+    if (clientsConfig[clientName].manager_id === managerId) {
+      managerClients[clientName] = clientsConfig[clientName];
+    }
+  });
+  return managerClients;
+}
+
+// Проверить права на клиента
+function canAccessClient(userId, clientName) {
+  if (isSuperAdmin(userId)) return true;
+  if (!clientsConfig[clientName]) return false;
+  return clientsConfig[clientName].manager_id === userId;
 }
 
 // Состояние пользователей для многошагового ввода
 const userStates = {};
 
-// Функция для конвертации прокси из формата ip:port:user:pass в объект
+// Функция для конвертации прокси из формата ip:port:user:pass
 function parseProxyFormat(proxyLine) {
   const parts = proxyLine.trim().split(':');
   if (parts.length === 4) {
@@ -93,15 +146,23 @@ function parseProxyFormat(proxyLine) {
   return null;
 }
 
-// Главное меню
-function getMainMenu() {
+// Главное меню с учетом роли
+function getMainMenu(userId) {
+  const baseMenu = [
+    ['📋 Мои клиенты', '➕ Добавить клиента'],
+    ['🗑 Удалить клиента', '🔄 Обновить сервер'],
+    ['📊 Моя статистика', '❓ Помощь']
+  ];
+
+  if (isSuperAdmin(userId)) {
+    baseMenu[0][0] = '📋 Все клиенты';
+    baseMenu[2][0] = '📊 Общая статистика';
+    baseMenu.push(['👥 Управление менеджерами']);
+  }
+
   return {
     reply_markup: {
-      keyboard: [
-        ['📋 Список клиентов', '➕ Добавить клиента'],
-        ['🗑 Удалить клиента', '🔄 Обновить сервер'],
-        ['📊 Статистика', '❓ Помощь']
-      ],
+      keyboard: baseMenu,
       resize_keyboard: true,
       one_time_keyboard: false
     }
@@ -113,29 +174,33 @@ bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
 
-  if (!isAdmin(userId)) {
-    bot.sendMessage(chatId, '❌ У вас нет прав доступа к этому боту.');
+  if (!hasAccess(userId)) {
+    bot.sendMessage(chatId, '❌ У вас нет прав доступа к этому боту.\n\n📞 Обратитесь к администратору для получения доступа.');
     return;
   }
 
+  const role = isSuperAdmin(userId) ? 'Супер-администратор' : 'Менеджер';
   const welcomeMessage = `
 🚀 *Добро пожаловать в Proxy Manager Bot!*
 
-Этот бот позволяет управлять клиентами и прокси на вашем Railway сервере.
+👤 *Ваша роль:* ${role}
+🆔 *Ваш ID:* \`${userId}\`
 
-*Доступные функции:*
-• 📋 Просмотр списка клиентов
+${isSuperAdmin(userId) ? 
+  '*Супер-админ функции:*\n• 👁 Просмотр всех клиентов всех менеджеров\n• 👥 Управление менеджерами\n• 📊 Общая статистика системы\n\n*Менеджер функции:*' : 
+  '*Доступные функции:*'}
+• 📋 Просмотр ваших клиентов
 • ➕ Добавление новых клиентов
-• 🗑 Удаление клиентов
+• 🗑 Удаление ваших клиентов
 • 🔄 Обновление конфигурации сервера
-• 📊 Просмотр статистики
+• 📊 Ваша статистика
 
 Выберите действие из меню ниже:
   `;
 
   bot.sendMessage(chatId, welcomeMessage, { 
     parse_mode: 'Markdown',
-    ...getMainMenu()
+    ...getMainMenu(userId)
   });
 });
 
@@ -145,7 +210,7 @@ bot.on('message', async (msg) => {
   const userId = msg.from.id;
   const text = msg.text;
 
-  if (!isAdmin(userId)) {
+  if (!hasAccess(userId)) {
     return;
   }
 
@@ -156,8 +221,9 @@ bot.on('message', async (msg) => {
   }
 
   switch (text) {
-    case '📋 Список клиентов':
-      await showClientsList(chatId);
+    case '📋 Мои клиенты':
+    case '📋 Все клиенты':
+      await showClientsList(chatId, userId);
       break;
 
     case '➕ Добавить клиента':
@@ -172,40 +238,62 @@ bot.on('message', async (msg) => {
       await updateServerConfig(chatId);
       break;
 
-    case '📊 Статистика':
-      await showStatistics(chatId);
+    case '📊 Моя статистика':
+    case '📊 Общая статистика':
+      await showStatistics(chatId, userId);
+      break;
+
+    case '👥 Управление менеджерами':
+      if (isSuperAdmin(userId)) {
+        await showManagersInfo(chatId);
+      }
       break;
 
     case '❓ Помощь':
-      await showHelp(chatId);
+      await showHelp(chatId, userId);
       break;
 
     default:
       if (text && !text.startsWith('/')) {
-        bot.sendMessage(chatId, '❓ Неизвестная команда. Используйте меню ниже:', getMainMenu());
+        bot.sendMessage(chatId, '❓ Неизвестная команда. Используйте меню ниже:', getMainMenu(userId));
       }
   }
 });
 
-// Показать список клиентов
-async function showClientsList(chatId) {
-  if (Object.keys(clientsConfig).length === 0) {
-    bot.sendMessage(chatId, '📭 Список клиентов пуст.', getMainMenu());
+// Показать список клиентов (с учетом роли)
+async function showClientsList(chatId, userId) {
+  const managerClients = getManagerClients(userId);
+  
+  if (Object.keys(managerClients).length === 0) {
+    const message = isSuperAdmin(userId) ? 
+      '📭 В системе нет клиентов.' : 
+      '📭 У вас нет добавленных клиентов.';
+    bot.sendMessage(chatId, message, getMainMenu(userId));
     return;
   }
 
-  let message = '📋 *Список клиентов:*\n\n';
+  const title = isSuperAdmin(userId) ? 
+    '📋 *Все клиенты системы:*' : 
+    '📋 *Ваши клиенты:*';
   
-  Object.keys(clientsConfig).forEach((clientName, index) => {
-    const client = clientsConfig[clientName];
+  let message = `${title}\n\n`;
+  
+  Object.keys(managerClients).forEach((clientName, index) => {
+    const client = managerClients[clientName];
     message += `${index + 1}. *${clientName}*\n`;
     message += `   🔑 Пароль: \`${client.password}\`\n`;
-    message += `   🌐 Прокси: ${client.proxies.length} шт.\n\n`;
+    message += `   🌐 Прокси: ${client.proxies.length} шт.\n`;
+    
+    if (isSuperAdmin(userId)) {
+      message += `   👤 Менеджер ID: \`${client.manager_id}\`\n`;
+      message += `   📅 Создан: ${new Date(client.created_at).toLocaleDateString()}\n`;
+    }
+    message += '\n';
   });
 
   bot.sendMessage(chatId, message, { 
     parse_mode: 'Markdown',
-    ...getMainMenu()
+    ...getMainMenu(userId)
   });
 }
 
@@ -226,14 +314,19 @@ async function startAddClient(chatId, userId) {
   });
 }
 
-// Показать меню удаления клиента
+// Показать меню удаления клиента (только свои)
 async function showDeleteClientMenu(chatId, userId) {
-  if (Object.keys(clientsConfig).length === 0) {
-    bot.sendMessage(chatId, '📭 Нет клиентов для удаления.', getMainMenu());
+  const managerClients = getManagerClients(userId);
+  
+  if (Object.keys(managerClients).length === 0) {
+    const message = isSuperAdmin(userId) ? 
+      '📭 Нет клиентов для удаления.' : 
+      '📭 У вас нет клиентов для удаления.';
+    bot.sendMessage(chatId, message, getMainMenu(userId));
     return;
   }
 
-  const keyboard = Object.keys(clientsConfig).map(clientName => [clientName]);
+  const keyboard = Object.keys(managerClients).map(clientName => [clientName]);
   keyboard.push(['❌ Отмена']);
 
   userStates[userId] = {
@@ -241,7 +334,11 @@ async function showDeleteClientMenu(chatId, userId) {
     data: {}
   };
 
-  bot.sendMessage(chatId, '🗑 *Удаление клиента*\n\nВыберите клиента для удаления:', {
+  const title = isSuperAdmin(userId) ? 
+    '🗑 *Удаление клиента*\n\nВыберите клиента для удаления:' :
+    '🗑 *Удаление вашего клиента*\n\nВыберите клиента для удаления:';
+
+  bot.sendMessage(chatId, title, {
     parse_mode: 'Markdown',
     reply_markup: {
       keyboard: keyboard,
@@ -257,7 +354,7 @@ async function handleUserState(chatId, userId, text) {
 
   if (text === '❌ Отмена') {
     delete userStates[userId];
-    bot.sendMessage(chatId, '❌ Операция отменена.', getMainMenu());
+    bot.sendMessage(chatId, '❌ Операция отменена.', getMainMenu(userId));
     return;
   }
 
@@ -324,24 +421,32 @@ async function handleUserState(chatId, userId, text) {
         return;
       }
 
-      // Сохраняем клиента
+      // Сохраняем клиента с привязкой к менеджеру
       clientsConfig[state.data.clientName] = {
         password: state.data.password,
-        proxies: proxies
+        proxies: proxies,
+        manager_id: userId,  // ✅ Привязываем к менеджеру
+        created_at: new Date().toISOString()
       };
 
       saveClientsConfig();
       delete userStates[userId];
 
-      bot.sendMessage(chatId, `✅ *Клиент успешно добавлен!*\n\n👤 Имя: *${state.data.clientName}*\n🔑 Пароль: \`${state.data.password}\`\n🌐 Прокси: ${proxies.length} шт.\n\n💡 Нажмите "🔄 Обновить сервер" для применения изменений!`, {
+      bot.sendMessage(chatId, `✅ *Клиент успешно добавлен!*\n\n👤 Имя: *${state.data.clientName}*\n🔑 Пароль: \`${state.data.password}\`\n🌐 Прокси: ${proxies.length} шт.\n👤 Менеджер: \`${userId}\`\n\n💡 Нажмите "🔄 Обновить сервер" для применения изменений!`, {
         parse_mode: 'Markdown',
-        ...getMainMenu()
+        ...getMainMenu(userId)
       });
       break;
 
     case 'waiting_delete_client':
       if (!clientsConfig[text]) {
         bot.sendMessage(chatId, '❌ Клиент не найден. Выберите из списка:');
+        return;
+      }
+
+      // Проверяем права доступа
+      if (!canAccessClient(userId, text)) {
+        bot.sendMessage(chatId, '❌ У вас нет прав на удаление этого клиента.');
         return;
       }
 
@@ -352,7 +457,7 @@ async function handleUserState(chatId, userId, text) {
 
       bot.sendMessage(chatId, `✅ *Клиент удален!*\n\n👤 Имя: *${text}*\n🌐 Удалено прокси: ${clientToDelete.proxies.length} шт.\n\n💡 Нажмите "🔄 Обновить сервер" для применения изменений!`, {
         parse_mode: 'Markdown',
-        ...getMainMenu()
+        ...getMainMenu(userId)
       });
       break;
   }
@@ -361,12 +466,10 @@ async function handleUserState(chatId, userId, text) {
 // Обновить конфигурацию сервера
 async function updateServerConfig(chatId) {
   try {
-    // Сохраняем конфигурацию в JSON файл локально
     saveClientsConfig();
     
     let reloadResult = null;
     
-    // Отправляем конфигурацию на прокси сервер
     if (PROXY_SERVER_URL) {
       try {
         const fetch = (await import('node-fetch')).default;
@@ -397,55 +500,124 @@ async function updateServerConfig(chatId) {
       : `✅ *Конфигурация сохранена!*\n\n📊 Клиентов: ${Object.keys(clientsConfig).length}\n📁 Файл: clients-config.json\n\n${PROXY_SERVER_URL ? '⚠️ Не удалось обновить прокси сервер' : '💡 Прокси сервер URL не указан'}`;
     
     bot.sendMessage(chatId, message, {
-      parse_mode: 'Markdown',
-      ...getMainMenu()
+      parse_mode: 'Markdown'
     });
   } catch (error) {
     console.error('❌ Ошибка обновления конфигурации:', error);
-    bot.sendMessage(chatId, '❌ Ошибка при обновлении конфигурации сервера.', getMainMenu());
+    bot.sendMessage(chatId, '❌ Ошибка при обновлении конфигурации сервера.');
   }
 }
 
-// Показать статистику
-async function showStatistics(chatId) {
-  const totalClients = Object.keys(clientsConfig).length;
+// Показать статистику (с учетом роли)
+async function showStatistics(chatId, userId) {
+  const managerClients = getManagerClients(userId);
+  const totalClients = Object.keys(managerClients).length;
   let totalProxies = 0;
   let clientStats = '';
 
-  Object.keys(clientsConfig).forEach((clientName, index) => {
-    const client = clientsConfig[clientName];
+  Object.keys(managerClients).forEach((clientName, index) => {
+    const client = managerClients[clientName];
     totalProxies += client.proxies.length;
-    clientStats += `${index + 1}. *${clientName}*: ${client.proxies.length} прокси\n`;
+    clientStats += `${index + 1}. *${clientName}*: ${client.proxies.length} прокси`;
+    
+    if (isSuperAdmin(userId)) {
+      clientStats += ` (ID: ${client.manager_id})`;
+    }
+    clientStats += '\n';
   });
 
-  const message = `📊 *Статистика системы*\n\n👥 Всего клиентов: *${totalClients}*\n🌐 Всего прокси: *${totalProxies}*\n\n*Детализация по клиентам:*\n${clientStats || 'Нет клиентов'}`;
+  const title = isSuperAdmin(userId) ? 
+    '📊 *Статистика всей системы*' : 
+    '📊 *Ваша статистика*';
+
+  let message = `${title}\n\n👥 Клиентов: *${totalClients}*\n🌐 Прокси: *${totalProxies}*\n\n*Детализация:*\n${clientStats || 'Нет клиентов'}`;
+
+  if (isSuperAdmin(userId)) {
+    const managerStats = {};
+    Object.keys(clientsConfig).forEach(clientName => {
+      const managerId = clientsConfig[clientName].manager_id;
+      if (!managerStats[managerId]) {
+        managerStats[managerId] = { clients: 0, proxies: 0 };
+      }
+      managerStats[managerId].clients++;
+      managerStats[managerId].proxies += clientsConfig[clientName].proxies.length;
+    });
+
+    message += '\n*📊 Статистика по менеджерам:*\n';
+    Object.keys(managerStats).forEach(managerId => {
+      const stats = managerStats[managerId];
+      message += `ID ${managerId}: ${stats.clients} клиентов, ${stats.proxies} прокси\n`;
+    });
+  }
 
   bot.sendMessage(chatId, message, {
     parse_mode: 'Markdown',
-    ...getMainMenu()
+    ...getMainMenu(userId)
   });
 }
 
-// Показать помощь
-async function showHelp(chatId) {
-  const helpMessage = `
+// Показать информацию о менеджерах (только для супер-админа)
+async function showManagersInfo(chatId) {
+  let message = '👥 *Управление менеджерами*\n\n';
+  message += `🔑 *Супер-админ:* \`${SUPER_ADMIN_ID}\`\n\n`;
+  message += '*📋 Список менеджеров:*\n';
+  
+  MANAGER_IDS.forEach((managerId, index) => {
+    const clientCount = Object.keys(clientsConfig).filter(
+      clientName => clientsConfig[clientName].manager_id === managerId
+    ).length;
+    
+    const role = managerId === SUPER_ADMIN_ID ? ' (Супер-админ)' : '';
+    message += `${index + 1}. ID: \`${managerId}\`${role} - ${clientCount} клиентов\n`;
+  });
+
+  message += '\n*💡 Для добавления менеджера:*\n';
+  message += 'Добавьте его ID в переменную MANAGER_IDS в Railway';
+
+  bot.sendMessage(chatId, message, {
+    parse_mode: 'Markdown'
+  });
+}
+
+// Показать помощь (с учетом роли)
+async function showHelp(chatId, userId) {
+  const role = isSuperAdmin(userId) ? 'супер-администратор' : 'менеджер';
+  
+  let helpMessage = `
 ❓ *Справка по использованию бота*
+
+👤 *Ваша роль:* ${role}
+🆔 *Ваш ID:* \`${userId}\`
 
 *Основные функции:*
 
-📋 *Список клиентов* - показывает всех добавленных клиентов с их паролями и количеством прокси
+📋 *Список клиентов* - показывает ${isSuperAdmin(userId) ? 'всех клиентов системы' : 'только ваших клиентов'}
 
 ➕ *Добавить клиента* - пошаговое добавление нового клиента:
    1. Введите имя клиента
    2. Введите пароль для подключения
    3. Отправьте список прокси в формате \`ip:port:user:pass\`
 
-🗑 *Удалить клиента* - удаление клиента и всех его прокси
+🗑 *Удалить клиента* - удаление ${isSuperAdmin(userId) ? 'любого клиента' : 'только ваших клиентов'}
 
 🔄 *Обновить сервер* - сохраняет конфигурацию и уведомляет прокси сервер
 
-📊 *Статистика* - показывает общую информацию о клиентах и прокси
+📊 *Статистика* - показывает ${isSuperAdmin(userId) ? 'общую статистику системы' : 'вашу статистику'}
+  `;
 
+  if (isSuperAdmin(userId)) {
+    helpMessage += `
+👥 *Управление менеджерами* - просмотр списка менеджеров и их статистики
+
+*🔑 Супер-админ возможности:*
+• Просмотр всех клиентов всех менеджеров
+• Удаление любых клиентов
+• Просмотр статистики по менеджерам
+• Управление доступами
+    `;
+  }
+
+  helpMessage += `
 *Формат прокси:*
 \`31.44.190.27:9625:512sdn:M0HBKk\`
 где: IP:PORT:USERNAME:PASSWORD
@@ -455,15 +627,16 @@ async function showHelp(chatId) {
 
   bot.sendMessage(chatId, helpMessage, {
     parse_mode: 'Markdown',
-    ...getMainMenu()
+    ...getMainMenu(userId)
   });
 }
 
 // Запуск HTTP сервера для Railway
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🌐 HTTP server running on port ${PORT}`);
-  console.log('🤖 Telegram Bot запущен!');
-  console.log(`👥 Администраторы: ${ADMIN_IDS.join(', ')}`);
+  console.log('🤖 Telegram Bot с системой ролей запущен!');
+  console.log(`🔑 Супер-админ: ${SUPER_ADMIN_ID}`);
+  console.log(`👥 Менеджеры: ${MANAGER_IDS.join(', ')}`);
   console.log(`📁 Файл конфигурации: ${CLIENTS_CONFIG_PATH}`);
   console.log(`🌐 Прокси сервер URL: ${PROXY_SERVER_URL || 'не указан'}`);
   
