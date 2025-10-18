@@ -1,0 +1,29 @@
+{
+  "name": "proxy-manager-telegram-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot for managing Railway proxy server clients and proxies",
+  "main": "telegram-bot.js",
+  "scripts": {
+    "start": "node telegram-bot.js",
+    "dev": "nodemon telegram-bot.js"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.64.0",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "proxy",
+    "railway",
+    "manager"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
