@@ -1,4 +1,4 @@
-// telegram-bot.js — Telegram Bot для управления прокси клиентами (Railway Variables)
+// telegram-bot.js — Telegram Bot для управления прокси клиентами (FIXED FORMAT)
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 const fs = require('fs').promises;
@@ -152,6 +152,7 @@ async function updateProxyServer() {
     // Добавляем/обновляем клиентов из локальной конфигурации
     for (const [clientName, config] of Object.entries(clientsConfig)) {
       console.log(`🔍 Обрабатываем клиента: ${clientName}`);
+      console.log(`   Логин: ${config.login}`);
       console.log(`   Пароль: ${config.password}`);
       console.log(`   Прокси: ${config.proxies.length} шт.`);
       
@@ -163,8 +164,10 @@ async function updateProxyServer() {
       if (!currentClients.includes(clientName)) {
         console.log(`➕ Добавляем клиента на прокси сервер: ${clientName}`);
         
+        // ✅ ИСПРАВЛЕНО: Используем login вместо clientName для авторизации
         const requestBody = {
           clientName: clientName,
+          login: config.login,
           password: config.password,
           proxies: config.proxies
         };
@@ -377,6 +380,7 @@ bot.onText(/\/clients/, async (msg) => {
   
   for (const [clientName, config] of Object.entries(clientsConfig)) {
     message += `🔹 **${clientName}**\n`;
+    message += `   └ Логин: \`${config.login}\`\n`;
     message += `   └ Пароль: \`${config.password}\`\n`;
     message += `   └ Прокси: ${config.proxies.length} шт.\n\n`;
   }
@@ -384,6 +388,7 @@ bot.onText(/\/clients/, async (msg) => {
   bot.sendMessage(msg.chat.id, message, { parse_mode: 'Markdown' });
 });
 
+// ✅ КОМАНДА: Быстрое добавление клиента (ОБНОВЛЕНО)
 bot.onText(/\/addclient/, async (msg) => {
   const userId = msg.from.id;
   if (!isAuthorized(userId)) {
@@ -398,8 +403,8 @@ bot.onText(/\/addclient/, async (msg) => {
 📋 **Два способа добавления:**
 
 **1️⃣ Быстрое добавление (без прокси):**
-\`имя_клиента пароль\`
-Пример: \`client1 mypassword123\`
+\`имя_клиента логин пароль\`
+Пример: \`client1 user123 mypassword123\`
 
 **2️⃣ Полное добавление (с прокси):**
 Используйте команду /addclientbulk
@@ -415,17 +420,18 @@ bot.onText(/\/addclient/, async (msg) => {
     console.log(`📝 Получен ответ для добавления клиента: "${response.text}"`);
     
     const parts = response.text.trim().split(' ');
-    if (parts.length !== 2) {
-      return bot.sendMessage(msg.chat.id, '❌ Неверный формат. Используйте: `имя_клиента пароль`\n\nДля добавления с прокси используйте /addclientbulk', { parse_mode: 'Markdown' });
+    if (parts.length !== 3) {
+      return bot.sendMessage(msg.chat.id, '❌ Неверный формат. Используйте: `имя_клиента логин пароль`\n\nДля добавления с прокси используйте /addclientbulk', { parse_mode: 'Markdown' });
     }
     
-    const [clientName, password] = parts;
+    const [clientName, login, password] = parts;
     
     if (clientsConfig[clientName]) {
       return bot.sendMessage(msg.chat.id, `❌ Клиент **${clientName}** уже существует.`, { parse_mode: 'Markdown' });
     }
     
     clientsConfig[clientName] = {
+      login,
       password,
       proxies: []
     };
@@ -436,13 +442,14 @@ bot.onText(/\/addclient/, async (msg) => {
     const updateResult = await updateProxyServer();
     
     if (updateResult.success) {
-      bot.sendMessage(msg.chat.id, `✅ Клиент **${clientName}** успешно добавлен!\n\n🔑 Пароль: \`${password}\`\n📊 Прокси: 0 шт.\n\nИспользуйте /addproxy для добавления прокси или /addclientbulk для массового добавления.`, { parse_mode: 'Markdown' });
+      bot.sendMessage(msg.chat.id, `✅ Клиент **${clientName}** успешно добавлен!\n\n🔑 Логин: \`${login}\`\n🔐 Пароль: \`${password}\`\n📊 Прокси: 0 шт.\n\nИспользуйте /addproxy для добавления прокси или /addclientbulk для массового добавления.`, { parse_mode: 'Markdown' });
     } else {
       bot.sendMessage(msg.chat.id, `⚠️ Клиент добавлен локально, но не удалось обновить прокси сервер.\n\nОшибка: ${updateResult.error || 'Unknown error'}`, { parse_mode: 'Markdown' });
     }
   });
 });
 
+// ✅ КОМАНДА: Добавление клиента со списком прокси (ИСПРАВЛЕНО)
 bot.onText(/\/addclientbulk/, async (msg) => {
   const userId = msg.from.id;
   if (!isAuthorized(userId)) {
@@ -454,13 +461,17 @@ bot.onText(/\/addclientbulk/, async (msg) => {
   const instructionMessage = `
 📦 **Добавление клиента со списком прокси**
 
-📋 **Формат:**
-Первая строка: \`имя_клиента пароль\`
-Остальные строки: список прокси в формате \`host:port:user:pass\`
+📋 **ПРАВИЛЬНЫЙ ФОРМАТ:**
+Строка 1: \`имя_клиента\`
+Строка 2: \`логин\`
+Строка 3: \`пароль\`
+Строки 4+: список прокси в формате \`host:port:user:pass\`
 
 📝 **Пример:**
 \`\`\`
-client1 mypassword123
+client1
+user123
+mypassword123
 31.129.21.214:9379:gNzocE:fnKaHc
 45.91.65.201:9524:gNzocE:fnKaHc
 45.91.65.235:9071:gNzocE:fnKaHc
@@ -480,26 +491,25 @@ client1 mypassword123
     const lines = response.text.trim().split('\n').map(line => line.trim()).filter(line => line.length > 0);
     console.log(`📋 Количество строк: ${lines.length}`);
     
-    if (lines.length < 1) {
-      return bot.sendMessage(msg.chat.id, '❌ Пустое сообщение. Введите данные клиента и прокси.', { parse_mode: 'Markdown' });
+    if (lines.length < 3) {
+      return bot.sendMessage(msg.chat.id, '❌ Недостаточно данных. Нужно минимум 3 строки:\n1. Имя клиента\n2. Логин\n3. Пароль\n4+ Прокси (опционально)', { parse_mode: 'Markdown' });
     }
     
-    const clientParts = lines[0].split(' ');
-    console.log(`👤 Первая строка: "${lines[0]}"`);
-    console.log(`🔍 Части клиента: [${clientParts.join(', ')}]`);
+    // ✅ ИСПРАВЛЕНО: Правильный парсинг по строкам
+    const clientName = lines[0].trim();
+    const login = lines[1].trim();
+    const password = lines[2].trim();
     
-    if (clientParts.length !== 2) {
-      return bot.sendMessage(msg.chat.id, '❌ Неверный формат первой строки. Используйте: `имя_клиента пароль`', { parse_mode: 'Markdown' });
-    }
-    
-    const [clientName, password] = clientParts;
-    console.log(`👤 Клиент: ${clientName}, Пароль: ${password}`);
+    console.log(`👤 Клиент: ${clientName}`);
+    console.log(`🔑 Логин: ${login}`);
+    console.log(`🔐 Пароль: ${password}`);
     
     if (clientsConfig[clientName]) {
       return bot.sendMessage(msg.chat.id, `❌ Клиент **${clientName}** уже существует.`, { parse_mode: 'Markdown' });
     }
     
-    const proxyLines = lines.slice(1);
+    // Парсим прокси (строки 4 и далее)
+    const proxyLines = lines.slice(3);
     console.log(`🌐 Строк с прокси: ${proxyLines.length}`);
     
     let proxies = [];
@@ -511,7 +521,9 @@ client1 mypassword123
       errors = parseResult.errors;
     }
     
+    // Создаем клиента с правильной структурой
     clientsConfig[clientName] = {
+      login,
       password,
       proxies
     };
@@ -519,10 +531,12 @@ client1 mypassword123
     await saveConfig();
     console.log(`✅ Клиент ${clientName} добавлен локально с ${proxies.length} прокси`);
     
+    // Обновляем прокси сервер
     const updateResult = await updateProxyServer();
     
     let resultMessage = `✅ Клиент **${clientName}** успешно добавлен!\n\n`;
-    resultMessage += `🔑 Пароль: \`${password}\`\n`;
+    resultMessage += `🔑 Логин: \`${login}\`\n`;
+    resultMessage += `🔐 Пароль: \`${password}\`\n`;
     resultMessage += `📊 Прокси: ${proxies.length} шт.\n`;
     
     if (errors.length > 0) {
@@ -543,6 +557,7 @@ client1 mypassword123
   });
 });
 
+// ✅ КОМАНДА: Принудительная синхронизация
 bot.onText(/\/sync/, async (msg) => {
   const userId = msg.from.id;
   if (!isAuthorized(userId)) {
@@ -579,7 +594,7 @@ bot.onText(/\/status/, async (msg) => {
   if (totalClients > 0) {
     message += `📋 **Детали по клиентам:**\n`;
     for (const [clientName, config] of Object.entries(clientsConfig)) {
-      message += `• **${clientName}**: ${config.proxies.length} прокси\n`;
+      message += `• **${clientName}** (${config.login}): ${config.proxies.length} прокси\n`;
     }
   }
   
@@ -592,8 +607,8 @@ bot.onText(/\/status/, async (msg) => {
 // ====== HTTP СЕРВЕР ======
 app.get('/', (req, res) => {
   res.send(`
-    <h1>🤖 Telegram Proxy Manager Bot (Railway Variables)</h1>
-    <p>Bot is running with Railway variables support!</p>
+    <h1>🤖 Telegram Proxy Manager Bot (FIXED FORMAT)</h1>
+    <p>Bot is running with correct client format: clientName + login + password + proxies!</p>
     <p>ADMIN_IDS env: "${process.env.ADMIN_IDS || 'NOT SET'}"</p>
     <p>SUPER_ADMIN env: "${process.env.SUPER_ADMIN || 'NOT SET'}"</p>
     <p>MANAGER_IDS env: "${process.env.MANAGER_IDS || 'NOT SET'}"</p>
@@ -633,7 +648,7 @@ async function startBot() {
     console.log(`🌐 HTTP server running on port ${PORT}`);
   });
   
-  console.log('🤖 Telegram Bot с поддержкой Railway переменных запущен!');
+  console.log('🤖 Telegram Bot с правильным форматом клиентов запущен!');
   console.log(`🔑 Супер-админ: ${SUPER_ADMIN_ID}`);
   console.log(`👥 Менеджеры: ${MANAGER_IDS.join(', ')}`);
   console.log(`📁 Файл конфигурации: ${CONFIG_FILE}`);
