@@ -1,4 +1,4 @@
-// telegram-bot.js — Telegram Bot для управления прокси клиентами (С ОТЛАДКОЙ)
+// telegram-bot.js — Telegram Bot для управления прокси клиентами (ИСПРАВЛЕНО)
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 const fs = require('fs').promises;
@@ -203,7 +203,7 @@ bot.on('message', (msg) => {
   console.log(`   Роль: ${getUserRole(userId)}`);
 });
 
-// ====== КОМАНДЫ БОТА ======
+// ====== КОМАНДЫ БОТА (ИСПРАВЛЕНЫ) ======
 bot.onText(/\/start/, async (msg) => {
   const userId = msg.from.id;
   const role = getUserRole(userId);
@@ -236,16 +236,16 @@ bot.onText(/\/start/, async (msg) => {
 
 📋 **Доступные команды:**
 /clients - Список всех клиентов
-/add_client - Добавить нового клиента
-/delete_client - Удалить клиента
-/add_proxy - Добавить прокси к клиенту
-/remove_proxy - Удалить прокси у клиента
-/rotate_proxy - Ротировать прокси клиента
+/addclient - Добавить нового клиента
+/deleteclient - Удалить клиента
+/addproxy - Добавить прокси к клиенту
+/removeproxy - Удалить прокси у клиента
+/rotateproxy - Ротировать прокси клиента
 /status - Статус системы
 /debug - Отладочная информация
 
 🔧 **Админские команды:**
-${isSuperAdmin(userId) ? '/manage_admins - Управление администраторами' : ''}
+${isSuperAdmin(userId) ? '/manageadmins - Управление администраторами' : ''}
 /restart - Перезапуск бота (только супер-админ)
   `;
   
@@ -291,7 +291,7 @@ bot.onText(/\/clients/, async (msg) => {
   }
   
   if (Object.keys(clientsConfig).length === 0) {
-    return bot.sendMessage(msg.chat.id, '📝 Клиенты не найдены. Используйте /add_client для добавления.');
+    return bot.sendMessage(msg.chat.id, '📝 Клиенты не найдены. Используйте /addclient для добавления.');
   }
   
   let message = '👥 **Список клиентов:**\n\n';
@@ -305,16 +305,21 @@ bot.onText(/\/clients/, async (msg) => {
   bot.sendMessage(msg.chat.id, message, { parse_mode: 'Markdown' });
 });
 
-bot.onText(/\/add_client/, async (msg) => {
+// ✅ ИСПРАВЛЕНО: Команда /addclient (без подчеркивания)
+bot.onText(/\/addclient/, async (msg) => {
   const userId = msg.from.id;
   if (!isAuthorized(userId)) {
     return bot.sendMessage(msg.chat.id, `❌ Нет доступа. Ваш ID: ${userId}. Используйте /debug для диагностики.`);
   }
   
+  console.log(`➕ Команда /addclient от userId=${userId}`);
+  
   bot.sendMessage(msg.chat.id, '➕ **Добавление нового клиента**\n\nВведите данные в формате:\n`имя_клиента пароль`\n\nПример: `client1 mypassword123`', { parse_mode: 'Markdown' });
   
   bot.once('message', async (response) => {
     if (response.from.id !== userId) return;
+    
+    console.log(`📝 Получен ответ для добавления клиента: "${response.text}"`);
     
     const parts = response.text.trim().split(' ');
     if (parts.length !== 2) {
@@ -333,19 +338,21 @@ bot.onText(/\/add_client/, async (msg) => {
     };
     
     await saveConfig();
+    console.log(`✅ Клиент ${clientName} добавлен локально`);
     
     // ✅ ИСПРАВЛЕНО: Обновляем прокси сервер с защитой от дублирования
     const updateResult = await updateProxyServer();
     
     if (updateResult.success) {
-      bot.sendMessage(msg.chat.id, `✅ Клиент **${clientName}** успешно добавлен!\n\n🔑 Пароль: \`${password}\`\n📊 Прокси: 0 шт.\n\nИспользуйте /add_proxy для добавления прокси.`, { parse_mode: 'Markdown' });
+      bot.sendMessage(msg.chat.id, `✅ Клиент **${clientName}** успешно добавлен!\n\n🔑 Пароль: \`${password}\`\n📊 Прокси: 0 шт.\n\nИспользуйте /addproxy для добавления прокси.`, { parse_mode: 'Markdown' });
     } else {
       bot.sendMessage(msg.chat.id, `⚠️ Клиент добавлен локально, но не удалось обновить прокси сервер.\n\nОшибка: ${updateResult.error || 'Unknown error'}`, { parse_mode: 'Markdown' });
     }
   });
 });
 
-bot.onText(/\/delete_client/, async (msg) => {
+// ✅ ИСПРАВЛЕНО: Команда /deleteclient (без подчеркивания)
+bot.onText(/\/deleteclient/, async (msg) => {
   const userId = msg.from.id;
   if (!isAuthorized(userId)) {
     return bot.sendMessage(msg.chat.id, `❌ Нет доступа. Ваш ID: ${userId}. Используйте /debug для диагностики.`);
@@ -383,14 +390,15 @@ bot.onText(/\/delete_client/, async (msg) => {
   });
 });
 
-bot.onText(/\/add_proxy/, async (msg) => {
+// ✅ ИСПРАВЛЕНО: Команда /addproxy (без подчеркивания)
+bot.onText(/\/addproxy/, async (msg) => {
   const userId = msg.from.id;
   if (!isAuthorized(userId)) {
     return bot.sendMessage(msg.chat.id, `❌ Нет доступа. Ваш ID: ${userId}. Используйте /debug для диагностики.`);
   }
   
   if (Object.keys(clientsConfig).length === 0) {
-    return bot.sendMessage(msg.chat.id, '📝 Сначала добавьте клиента с помощью /add_client');
+    return bot.sendMessage(msg.chat.id, '📝 Сначала добавьте клиента с помощью /addclient');
   }
   
   const clientsList = Object.keys(clientsConfig).map(name => `• ${name}`).join('\n');
@@ -468,8 +476,8 @@ bot.onText(/\/status/, async (msg) => {
 // ====== HTTP СЕРВЕР ======
 app.get('/', (req, res) => {
   res.send(`
-    <h1>🤖 Telegram Proxy Manager Bot (Debug Mode)</h1>
-    <p>Bot is running with debug authorization!</p>
+    <h1>🤖 Telegram Proxy Manager Bot (Fixed Commands)</h1>
+    <p>Bot is running with fixed command handlers!</p>
     <p>ADMIN_IDS: "${ADMIN_IDS_STRING}"</p>
     <p>Parsed IDs: [${ADMIN_IDS.join(', ')}]</p>
     <p>Super Admin: ${SUPER_ADMIN_ID || 'NOT SET'}</p>
@@ -503,7 +511,7 @@ async function startBot() {
     console.log(`🌐 HTTP server running on port ${PORT}`);
   });
   
-  console.log('🤖 Telegram Bot с системой ролей запущен (DEBUG MODE)!');
+  console.log('🤖 Telegram Bot с системой ролей запущен (FIXED COMMANDS)!');
   console.log(`🔑 Супер-админ: ${SUPER_ADMIN_ID}`);
   console.log(`👥 Менеджеры: ${MANAGER_IDS.join(', ')}`);
   console.log(`📁 Файл конфигурации: ${CONFIG_FILE}`);
