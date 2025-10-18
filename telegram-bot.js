@@ -1,4 +1,4 @@
-// ✅ ИСПРАВЛЕННЫЙ код с дополнительной отладкой
+// ✅ ИСПРАВЛЕННЫЙ код с Basic Auth для прокси сервера
 const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
 const fs = require('fs');
@@ -21,6 +21,12 @@ const MANAGER_IDS = process.env.MANAGER_IDS ?
 
 // URL прокси сервера для автоматического обновления
 const PROXY_SERVER_URL = process.env.PROXY_SERVER_URL || '';
+
+// ✅ ДОБАВЛЕНО: Авторизация для API запросов к прокси серверу
+const API_AUTH = {
+  username: 'telegram_bot',
+  password: 'bot_secret_2024'
+};
 
 // Путь к файлу конфигурации клиентов
 const CLIENTS_CONFIG_PATH = './clients-config.json';
@@ -155,12 +161,12 @@ function canAccessClient(userId, clientName) {
 // Состояние пользователей для многошагового ввода
 const userStates = {};
 
-// Функция для конвертации прокси из формата ip:port:user:pass
+// Функция для конвертации прокси из формата ip:port:user:pass в http://user:pass@ip:port
 function parseProxyFormat(proxyLine) {
   const parts = proxyLine.trim().split(':');
   if (parts.length === 4) {
     const [ip, port, username, password] = parts;
-    return `${ip}:${port}:${username}:${password}`;
+    return `http://${username}:${password}@${ip}:${port}`;
   }
   return null;
 }
@@ -482,7 +488,7 @@ async function handleUserState(chatId, userId, text) {
   }
 }
 
-// Обновить конфигурацию сервера
+// ✅ ИСПРАВЛЕНО: Обновить конфигурацию сервера с Basic Auth
 async function updateServerConfig(chatId) {
   try {
     saveClientsConfig();
@@ -491,24 +497,42 @@ async function updateServerConfig(chatId) {
     
     if (PROXY_SERVER_URL) {
       try {
-        const fetch = (await import('node-fetch')).default;
-        const response = await fetch(`${PROXY_SERVER_URL}/update-config`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            clients: clientsConfig
-          }),
+        // Используем axios для Basic Auth
+        const axios = require('axios');
+        
+        const response = await axios.post(`${PROXY_SERVER_URL}/api/add-client`, {
+          clientName: 'telegram_bot',
+          password: API_AUTH.password,
+          proxies: []
+        }, {
+          auth: API_AUTH,
           timeout: 10000
         });
         
-        if (response.ok) {
-          reloadResult = await response.json();
-          console.log('✅ Proxy server config updated:', reloadResult);
-        } else {
-          throw new Error(`HTTP ${response.status}`);
+        console.log('✅ Proxy server connection test successful');
+        
+        // Теперь обновляем всех клиентов
+        for (const [clientName, clientData] of Object.entries(clientsConfig)) {
+          try {
+            await axios.post(`${PROXY_SERVER_URL}/api/add-client`, {
+              clientName: clientName,
+              password: clientData.password,
+              proxies: clientData.proxies
+            }, {
+              auth: API_AUTH,
+              timeout: 10000
+            });
+          } catch (err) {
+            if (err.response?.status === 409) {
+              console.log(`Client ${clientName} already exists, skipping...`);
+            } else {
+              console.log(`Failed to add client ${clientName}:`, err.message);
+            }
+          }
         }
+        
+        reloadResult = { success: true, clients: Object.keys(clientsConfig).length };
+        
       } catch (err) {
         console.log('⚠️ Failed to update proxy server:', err.message);
       }
@@ -658,6 +682,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`👥 Менеджеры: ${MANAGER_IDS.join(', ')}`);
   console.log(`📁 Файл конфигурации: ${CLIENTS_CONFIG_PATH}`);
   console.log(`🌐 Прокси сервер URL: ${PROXY_SERVER_URL || 'не указан'}`);
+  console.log(`🔐 API Auth: ${API_AUTH.username}:${API_AUTH.password}`);
   
   // Инициализация
   loadClientsConfig();
