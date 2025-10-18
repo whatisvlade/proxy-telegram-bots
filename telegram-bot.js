@@ -1,4 +1,4 @@
-// telegram-bot.js — Telegram Bot для управления прокси клиентами (ИСПРАВЛЕНО)
+// telegram-bot.js — Telegram Bot для управления прокси клиентами (ENHANCED)
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 const fs = require('fs').promises;
@@ -189,6 +189,28 @@ function getUserRole(userId) {
   return 'Не авторизован';
 }
 
+// ====== ФУНКЦИИ ПАРСИНГА ПРОКСИ ======
+function parseProxyList(proxyText) {
+  const lines = proxyText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+  const proxies = [];
+  const errors = [];
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const parts = line.split(':');
+    
+    if (parts.length === 4) {
+      const [host, port, user, pass] = parts;
+      const proxyUrl = `http://${user}:${pass}@${host}:${port}`;
+      proxies.push(proxyUrl);
+    } else {
+      errors.push(`Строка ${i + 1}: "${line}" - неверный формат`);
+    }
+  }
+  
+  return { proxies, errors };
+}
+
 // ====== ОБРАБОТЧИК ВСЕХ СООБЩЕНИЙ (ДЛЯ ОТЛАДКИ) ======
 bot.on('message', (msg) => {
   const userId = msg.from.id;
@@ -198,12 +220,12 @@ bot.on('message', (msg) => {
   console.log(`\n📨 ПОЛУЧЕНО СООБЩЕНИЕ:`);
   console.log(`   От: ${firstName} (@${username})`);
   console.log(`   ID: ${userId}`);
-  console.log(`   Текст: "${msg.text}"`);
+  console.log(`   Текст: "${msg.text ? msg.text.substring(0, 100) : 'не текст'}${msg.text && msg.text.length > 100 ? '...' : ''}"`);
   console.log(`   Авторизован: ${isAuthorized(userId)}`);
   console.log(`   Роль: ${getUserRole(userId)}`);
 });
 
-// ====== КОМАНДЫ БОТА (ИСПРАВЛЕНЫ) ======
+// ====== КОМАНДЫ БОТА (ENHANCED) ======
 bot.onText(/\/start/, async (msg) => {
   const userId = msg.from.id;
   const role = getUserRole(userId);
@@ -236,7 +258,8 @@ bot.onText(/\/start/, async (msg) => {
 
 📋 **Доступные команды:**
 /clients - Список всех клиентов
-/addclient - Добавить нового клиента
+/addclient - Добавить клиента (быстро или с прокси)
+/addclientbulk - Добавить клиента со списком прокси
 /deleteclient - Удалить клиента
 /addproxy - Добавить прокси к клиенту
 /removeproxy - Удалить прокси у клиента
@@ -305,7 +328,7 @@ bot.onText(/\/clients/, async (msg) => {
   bot.sendMessage(msg.chat.id, message, { parse_mode: 'Markdown' });
 });
 
-// ✅ ИСПРАВЛЕНО: Команда /addclient (без подчеркивания)
+// ✅ НОВАЯ КОМАНДА: Быстрое добавление клиента
 bot.onText(/\/addclient/, async (msg) => {
   const userId = msg.from.id;
   if (!isAuthorized(userId)) {
@@ -314,7 +337,22 @@ bot.onText(/\/addclient/, async (msg) => {
   
   console.log(`➕ Команда /addclient от userId=${userId}`);
   
-  bot.sendMessage(msg.chat.id, '➕ **Добавление нового клиента**\n\nВведите данные в формате:\n`имя_клиента пароль`\n\nПример: `client1 mypassword123`', { parse_mode: 'Markdown' });
+  const instructionMessage = `
+➕ **Добавление нового клиента**
+
+📋 **Два способа добавления:**
+
+**1️⃣ Быстрое добавление (без прокси):**
+\`имя_клиента пароль\`
+Пример: \`client1 mypassword123\`
+
+**2️⃣ Полное добавление (с прокси):**
+Используйте команду /addclientbulk
+
+💡 **Выберите способ и введите данные:**
+  `;
+  
+  bot.sendMessage(msg.chat.id, instructionMessage, { parse_mode: 'Markdown' });
   
   bot.once('message', async (response) => {
     if (response.from.id !== userId) return;
@@ -323,7 +361,7 @@ bot.onText(/\/addclient/, async (msg) => {
     
     const parts = response.text.trim().split(' ');
     if (parts.length !== 2) {
-      return bot.sendMessage(msg.chat.id, '❌ Неверный формат. Используйте: `имя_клиента пароль`', { parse_mode: 'Markdown' });
+      return bot.sendMessage(msg.chat.id, '❌ Неверный формат. Используйте: `имя_клиента пароль`\n\nДля добавления с прокси используйте /addclientbulk', { parse_mode: 'Markdown' });
     }
     
     const [clientName, password] = parts;
@@ -344,10 +382,107 @@ bot.onText(/\/addclient/, async (msg) => {
     const updateResult = await updateProxyServer();
     
     if (updateResult.success) {
-      bot.sendMessage(msg.chat.id, `✅ Клиент **${clientName}** успешно добавлен!\n\n🔑 Пароль: \`${password}\`\n📊 Прокси: 0 шт.\n\nИспользуйте /addproxy для добавления прокси.`, { parse_mode: 'Markdown' });
+      bot.sendMessage(msg.chat.id, `✅ Клиент **${clientName}** успешно добавлен!\n\n🔑 Пароль: \`${password}\`\n📊 Прокси: 0 шт.\n\nИспользуйте /addproxy для добавления прокси или /addclientbulk для массового добавления.`, { parse_mode: 'Markdown' });
     } else {
       bot.sendMessage(msg.chat.id, `⚠️ Клиент добавлен локально, но не удалось обновить прокси сервер.\n\nОшибка: ${updateResult.error || 'Unknown error'}`, { parse_mode: 'Markdown' });
     }
+  });
+});
+
+// ✅ НОВАЯ КОМАНДА: Добавление клиента со списком прокси
+bot.onText(/\/addclientbulk/, async (msg) => {
+  const userId = msg.from.id;
+  if (!isAuthorized(userId)) {
+    return bot.sendMessage(msg.chat.id, `❌ Нет доступа. Ваш ID: ${userId}. Используйте /debug для диагностики.`);
+  }
+  
+  console.log(`📦 Команда /addclientbulk от userId=${userId}`);
+  
+  const instructionMessage = `
+📦 **Добавление клиента со списком прокси**
+
+📋 **Формат:**
+Первая строка: \`имя_клиента пароль\`
+Остальные строки: список прокси в формате \`host:port:user:pass\`
+
+📝 **Пример:**
+\`\`\`
+client1 mypassword123
+31.129.21.214:9379:gNzocE:fnKaHc
+45.91.65.201:9524:gNzocE:fnKaHc
+45.91.65.235:9071:gNzocE:fnKaHc
+\`\`\`
+
+💡 **Введите данные в указанном формате:**
+  `;
+  
+  bot.sendMessage(msg.chat.id, instructionMessage, { parse_mode: 'Markdown' });
+  
+  bot.once('message', async (response) => {
+    if (response.from.id !== userId) return;
+    
+    console.log(`📦 Получен ответ для массового добавления клиента`);
+    
+    const lines = response.text.trim().split('\n').map(line => line.trim()).filter(line => line.length > 0);
+    
+    if (lines.length < 1) {
+      return bot.sendMessage(msg.chat.id, '❌ Пустое сообщение. Введите данные клиента и прокси.', { parse_mode: 'Markdown' });
+    }
+    
+    // Парсим первую строку как данные клиента
+    const clientParts = lines[0].split(' ');
+    if (clientParts.length !== 2) {
+      return bot.sendMessage(msg.chat.id, '❌ Неверный формат первой строки. Используйте: `имя_клиента пароль`', { parse_mode: 'Markdown' });
+    }
+    
+    const [clientName, password] = clientParts;
+    
+    if (clientsConfig[clientName]) {
+      return bot.sendMessage(msg.chat.id, `❌ Клиент **${clientName}** уже существует.`, { parse_mode: 'Markdown' });
+    }
+    
+    // Парсим остальные строки как прокси
+    const proxyLines = lines.slice(1);
+    let proxies = [];
+    let errors = [];
+    
+    if (proxyLines.length > 0) {
+      const parseResult = parseProxyList(proxyLines.join('\n'));
+      proxies = parseResult.proxies;
+      errors = parseResult.errors;
+    }
+    
+    // Создаем клиента
+    clientsConfig[clientName] = {
+      password,
+      proxies
+    };
+    
+    await saveConfig();
+    console.log(`✅ Клиент ${clientName} добавлен локально с ${proxies.length} прокси`);
+    
+    // Обновляем прокси сервер
+    const updateResult = await updateProxyServer();
+    
+    let resultMessage = `✅ Клиент **${clientName}** успешно добавлен!\n\n`;
+    resultMessage += `🔑 Пароль: \`${password}\`\n`;
+    resultMessage += `📊 Прокси: ${proxies.length} шт.\n`;
+    
+    if (errors.length > 0) {
+      resultMessage += `\n⚠️ **Ошибки в прокси:**\n`;
+      errors.slice(0, 5).forEach(error => {
+        resultMessage += `• ${error}\n`;
+      });
+      if (errors.length > 5) {
+        resultMessage += `• ... и еще ${errors.length - 5} ошибок\n`;
+      }
+    }
+    
+    if (!updateResult.success) {
+      resultMessage += `\n⚠️ Клиент добавлен локально, но не удалось обновить прокси сервер.\nОшибка: ${updateResult.error || 'Unknown error'}`;
+    }
+    
+    bot.sendMessage(msg.chat.id, resultMessage, { parse_mode: 'Markdown' });
   });
 });
 
@@ -476,8 +611,8 @@ bot.onText(/\/status/, async (msg) => {
 // ====== HTTP СЕРВЕР ======
 app.get('/', (req, res) => {
   res.send(`
-    <h1>🤖 Telegram Proxy Manager Bot (Fixed Commands)</h1>
-    <p>Bot is running with fixed command handlers!</p>
+    <h1>🤖 Telegram Proxy Manager Bot (Enhanced)</h1>
+    <p>Bot is running with enhanced bulk client creation!</p>
     <p>ADMIN_IDS: "${ADMIN_IDS_STRING}"</p>
     <p>Parsed IDs: [${ADMIN_IDS.join(', ')}]</p>
     <p>Super Admin: ${SUPER_ADMIN_ID || 'NOT SET'}</p>
@@ -511,7 +646,7 @@ async function startBot() {
     console.log(`🌐 HTTP server running on port ${PORT}`);
   });
   
-  console.log('🤖 Telegram Bot с системой ролей запущен (FIXED COMMANDS)!');
+  console.log('🤖 Telegram Bot с системой ролей запущен (ENHANCED)!');
   console.log(`🔑 Супер-админ: ${SUPER_ADMIN_ID}`);
   console.log(`👥 Менеджеры: ${MANAGER_IDS.join(', ')}`);
   console.log(`📁 Файл конфигурации: ${CONFIG_FILE}`);
