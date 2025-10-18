@@ -301,6 +301,20 @@ function parseProxyList(proxyText) {
   return { proxies, errors };
 }
 
+// ====== ФУНКЦИЯ СОЗДАНИЯ КЛАВИАТУРЫ ======
+function createMainKeyboard() {
+  return {
+    keyboard: [
+      [
+        { text: '➕ Добавить клиента' },
+        { text: '🗑️ Удалить клиента' }
+      ]
+    ],
+    resize_keyboard: true,
+    one_time_keyboard: false
+  };
+}
+
 // ====== ОБРАБОТЧИК ВСЕХ СООБЩЕНИЙ (ДЛЯ ОТЛАДКИ) ======
 bot.on('message', (msg) => {
   const userId = msg.from.id;
@@ -371,7 +385,10 @@ ${isSuperAdmin(userId) ? '/manageadmins - Управление админист�
 /restart - Перезапуск бота (только супер-админ)
   `;
 
-  bot.sendMessage(msg.chat.id, welcomeMessage, { parse_mode: 'Markdown' });
+  bot.sendMessage(msg.chat.id, welcomeMessage, { 
+    parse_mode: 'Markdown',
+    reply_markup: createMainKeyboard()
+  });
 });
 
 bot.onText(/\/debug/, async (msg) => {
@@ -985,7 +1002,7 @@ bot.onText(/\/health-detailed/, async (msg) => {
 
   try {
     const fetch = (await import('node-fetch')).default;
-    
+
     // Получаем детальную информацию с прокси сервера
     const healthResponse = await fetch(`${PROXY_SERVER_URL}/health-detailed`, {
       method: 'GET',
@@ -1017,7 +1034,7 @@ bot.onText(/\/health-detailed/, async (msg) => {
     const uptime = process.uptime();
 
     let message = `🔍 **Детальная информация системы**\n\n`;
-    
+
     message += `🤖 **Telegram Bot:**\n`;
     message += `• Память RSS: ${Math.round(memoryUsage.rss / 1024 / 1024)} MB\n`;
     message += `• Память Heap: ${Math.round(memoryUsage.heapUsed / 1024 / 1024)} MB\n`;
@@ -1058,7 +1075,7 @@ bot.onText(/\/api-stats/, async (msg) => {
 
   try {
     const fetch = (await import('node-fetch')).default;
-    
+
     // Получаем полную статистику с прокси сервера
     const statsResponse = await fetch(`${PROXY_SERVER_URL}/api/stats`, {
       method: 'GET',
@@ -1074,9 +1091,9 @@ bot.onText(/\/api-stats/, async (msg) => {
     }
 
     const statsData = await statsResponse.json();
-    
+
     let message = `📊 **Полная статистика по всем клиентам**\n\n`;
-    
+
     message += `🌐 **Общая информация:**\n`;
     message += `• Всего клиентов: ${statsData.totalClients || 0}\n`;
     message += `• Всего прокси: ${statsData.totalProxies || 0}\n`;
@@ -1094,7 +1111,7 @@ bot.onText(/\/api-stats/, async (msg) => {
         message += `   └ Успешных: ${clientStats.successful || 0}\n`;
         message += `   └ Ошибок: ${clientStats.errors || 0}\n`;
         message += `   └ Последняя активность: ${clientStats.lastActivity || 'N/A'}\n`;
-        
+
         if (clientStats.topProxies && clientStats.topProxies.length > 0) {
           message += `   └ Топ прокси:\n`;
           clientStats.topProxies.slice(0, 3).forEach((proxy, index) => {
@@ -1111,7 +1128,7 @@ bot.onText(/\/api-stats/, async (msg) => {
       const parts = [];
       let currentPart = '';
       const lines = message.split('\n');
-      
+
       for (const line of lines) {
         if ((currentPart + line + '\n').length > 4000) {
           parts.push(currentPart);
@@ -1120,7 +1137,7 @@ bot.onText(/\/api-stats/, async (msg) => {
           currentPart += line + '\n';
         }
       }
-      
+
       if (currentPart) {
         parts.push(currentPart);
       }
@@ -1128,7 +1145,7 @@ bot.onText(/\/api-stats/, async (msg) => {
       for (let i = 0; i < parts.length; i++) {
         const partMessage = i === 0 ? parts[i] : `📊 **Статистика (часть ${i + 1})**\n\n${parts[i]}`;
         await bot.sendMessage(msg.chat.id, partMessage, { parse_mode: 'Markdown' });
-        
+
         // Небольшая задержка между сообщениями
         if (i < parts.length - 1) {
           await new Promise(resolve => setTimeout(resolve, 500));
@@ -1142,6 +1159,248 @@ bot.onText(/\/api-stats/, async (msg) => {
     console.error('⚠️ Ошибка получения статистики:', error.message);
     bot.sendMessage(msg.chat.id, `❌ Ошибка получения статистики:\n\n\`${error.message}\``, { parse_mode: 'Markdown' });
   }
+});
+
+// ====== ОБРАБОТЧИКИ КНОПОК ======
+bot.onText(/^➕ Добавить клиента$/, async (msg) => {
+  const userId = msg.from.id;
+  if (!isAuthorized(userId)) {
+    return bot.sendMessage(msg.chat.id, `❌ Нет доступа. Ваш ID: ${userId}. Используйте /debug для диагностики.`);
+  }
+
+  console.log(`➕ Кнопка "Добавить клиента" от userId=${userId}`);
+
+  const instructionMessage = `
+➕ **Добавление клиента с прокси (ПРОСТОЙ ФОРМАТ)**
+
+📋 **Формат:**
+Строка 1: \`логин пароль\`
+Строки 2+: список прокси в формате \`host:port:user:pass\`
+
+📝 **Пример:**
+\`\`\`
+client1 mypassword123
+31.129.21.214:9379:gNzocE:fnKaHc
+45.91.65.201:9524:gNzocE:fnKaHc
+45.91.65.235:9071:gNzocE:fnKaHc
+\`\`\`
+
+💡 **Введите данные в указанном формате:**
+  `;
+
+  bot.sendMessage(msg.chat.id, instructionMessage, { parse_mode: 'Markdown' });
+
+  bot.once('message', async (response) => {
+    if (response.from.id !== userId) return;
+
+    console.log(`📦 Получен ответ для добавления клиента`);
+    console.log(`📝 Длина сообщения: ${response.text.length} символов`);
+
+    const lines = response.text.trim().split('\n').map(line => line.trim()).filter(line => line.length > 0);
+    console.log(`📋 Количество строк: ${lines.length}`);
+
+    if (lines.length < 1) {
+      return bot.sendMessage(msg.chat.id, '❌ Пустое сообщение. Введите логин, пароль и прокси.', { parse_mode: 'Markdown' });
+    }
+
+    // ✅ УПРОЩЕННЫЙ ФОРМАТ: Первая строка = логин пароль
+    const firstLineParts = lines[0].split(' ');
+    console.log(`👤 Первая строка: "${lines[0]}"`);
+    console.log(`🔍 Части: [${firstLineParts.join(', ')}]`);
+
+    if (firstLineParts.length !== 2) {
+      return bot.sendMessage(msg.chat.id, '❌ Неверный формат первой строки. Используйте: `логин пароль`', { parse_mode: 'Markdown' });
+    }
+
+    const [clientName, password] = firstLineParts;
+    console.log(`👤 Логин (clientName): ${clientName}`);
+    console.log(`🔐 Пароль: ${password}`);
+
+    if (clientsConfig[clientName]) {
+      return bot.sendMessage(msg.chat.id, `❌ Клиент **${clientName}** уже существует.`, { parse_mode: 'Markdown' });
+    }
+
+    // Парсим прокси (строки 2 и далее)
+    const proxyLines = lines.slice(1);
+    console.log(`🌐 Строк с прокси: ${proxyLines.length}`);
+
+    let proxies = [];
+    let errors = [];
+
+    if (proxyLines.length > 0) {
+      const parseResult = parseProxyList(proxyLines.join('\n'));
+      proxies = parseResult.proxies;
+      errors = parseResult.errors;
+    }
+
+    // Создаем клиента с упрощенной структурой
+    clientsConfig[clientName] = {
+      password,
+      proxies
+    };
+
+    await saveConfig();
+    console.log(`✅ Клиент ${clientName} добавлен локально с ${proxies.length} прокси`);
+
+    // Обновляем прокси сервер
+    const updateResult = await updateProxyServer();
+
+    let resultMessage = `✅ Клиент **${clientName}** успешно добавлен!\n\n`;
+    resultMessage += `🔑 Логин: \`${clientName}\`\n`;
+    resultMessage += `🔐 Пароль: \`${password}\`\n`;
+    resultMessage += `📊 Прокси: ${proxies.length} шт.\n`;
+
+    if (errors.length > 0) {
+      resultMessage += `\n⚠️ **Ошибки в прокси:**\n`;
+      errors.slice(0, 5).forEach(error => {
+        resultMessage += `• ${error}\n`;
+      });
+      if (errors.length > 5) {
+        resultMessage += `• ... и еще ${errors.length - 5} ошибок\n`;
+      }
+    }
+
+    if (!updateResult.success) {
+      resultMessage += `\n⚠️ Клиент добавлен локально, но не удалось обновить прокси сервер.\nОшибка: ${updateResult.error || 'Unknown error'}`;
+    }
+
+    bot.sendMessage(msg.chat.id, resultMessage, { 
+      parse_mode: 'Markdown',
+      reply_markup: createMainKeyboard()
+    });
+  });
+});
+
+bot.onText(/^🗑️ Удалить клиента$/, async (msg) => {
+  const userId = msg.from.id;
+  if (!isAuthorized(userId)) {
+    return bot.sendMessage(msg.chat.id, `❌ Нет доступа. Ваш ID: ${userId}. Используйте /debug для диагностики.`);
+  }
+
+  console.log(`🗑️ Кнопка "Удалить клиента" от userId=${userId}`);
+
+  if (Object.keys(clientsConfig).length === 0) {
+    return bot.sendMessage(msg.chat.id, '❌ Нет клиентов для удаления.', {
+      reply_markup: createMainKeyboard()
+    });
+  }
+
+  // Показываем список клиентов для удаления
+  let clientsList = '🗑️ **Удаление клиента**\n\n👥 **Выберите клиента для удаления:**\n\n';
+  const clientNames = Object.keys(clientsConfig);
+
+  for (const [index, clientName] of clientNames.entries()) {
+    const config = clientsConfig[clientName];
+    clientsList += `${index + 1}. **${clientName}** (${config.proxies.length} прокси)\n`;
+  }
+
+  clientsList += `\n💡 **Введите номер клиента или имя:**`;
+
+  bot.sendMessage(msg.chat.id, clientsList, { parse_mode: 'Markdown' });
+
+  bot.once('message', async (clientResponse) => {
+    if (clientResponse.from.id !== userId) return;
+
+    const clientInput = clientResponse.text.trim();
+    let selectedClient = null;
+
+    // Проверяем, это номер или имя
+    if (/^\d+$/.test(clientInput)) {
+      const clientIndex = parseInt(clientInput) - 1;
+      if (clientIndex >= 0 && clientIndex < clientNames.length) {
+        selectedClient = clientNames[clientIndex];
+      }
+    } else {
+      if (clientsConfig[clientInput]) {
+        selectedClient = clientInput;
+      }
+    }
+
+    if (!selectedClient) {
+      return bot.sendMessage(msg.chat.id, '❌ Клиент не найден. Попробуйте еще раз.', {
+        reply_markup: createMainKeyboard()
+      });
+    }
+
+    console.log(`🗑️ Выбран для удаления клиент: ${selectedClient}`);
+
+    // Подтверждение удаления
+    const confirmMessage = `
+⚠️ **ПОДТВЕРЖДЕНИЕ УДАЛЕНИЯ**
+
+🗑️ Клиент: **${selectedClient}**
+📊 Прокси: ${clientsConfig[selectedClient].proxies.length} шт.
+
+❗ **Это действие нельзя отменить!**
+
+💡 **Введите "ДА" для подтверждения или любой другой текст для отмены:**
+    `;
+
+    bot.sendMessage(msg.chat.id, confirmMessage, { parse_mode: 'Markdown' });
+
+    bot.once('message', async (confirmResponse) => {
+      if (confirmResponse.from.id !== userId) return;
+
+      const confirmation = confirmResponse.text.trim().toLowerCase();
+
+      if (confirmation !== 'да' && confirmation !== 'yes' && confirmation !== 'y') {
+        return bot.sendMessage(msg.chat.id, '❌ Удаление отменено.', {
+          reply_markup: createMainKeyboard()
+        });
+      }
+
+      console.log(`🗑️ Подтверждено удаление клиента: ${selectedClient}`);
+
+      // Удаляем клиента из локальной конфигурации
+      const deletedConfig = clientsConfig[selectedClient];
+      delete clientsConfig[selectedClient];
+      await saveConfig();
+
+      console.log(`✅ Клиент ${selectedClient} удален из локальной конфигурации`);
+
+      // Удаляем клиента с прокси сервера
+      try {
+        const fetch = (await import('node-fetch')).default;
+
+        const deleteResponse = await fetch(`${PROXY_SERVER_URL}/api/delete-client/${selectedClient}`, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          timeout: 15000
+        });
+
+        let resultMessage = `✅ Клиент **${selectedClient}** успешно удален!\n\n`;
+        resultMessage += `📊 Удалено прокси: ${deletedConfig.proxies.length} шт.\n`;
+
+        if (deleteResponse.ok) {
+          console.log(`✅ Клиент ${selectedClient} успешно удален с прокси сервера`);
+          resultMessage += `🌐 Клиент также удален с прокси сервера.`;
+        } else {
+          const errorText = await deleteResponse.text();
+          console.error(`❌ Failed to delete client from proxy server: ${deleteResponse.status} ${errorText}`);
+          resultMessage += `⚠️ Клиент удален локально, но не удалось удалить с прокси сервера.\nОшибка: ${deleteResponse.status} ${errorText}`;
+        }
+
+        bot.sendMessage(msg.chat.id, resultMessage, { 
+          parse_mode: 'Markdown',
+          reply_markup: createMainKeyboard()
+        });
+
+      } catch (error) {
+        console.error('⚠️ Ошибка удаления клиента с прокси сервера:', error.message);
+
+        const errorMessage = `✅ Клиент **${selectedClient}** удален локально!\n\n`;
+        errorMessage += `📊 Удалено прокси: ${deletedConfig.proxies.length} шт.\n`;
+        errorMessage += `⚠️ Не удалось удалить с прокси сервера: ${error.message}`;
+
+        bot.sendMessage(msg.chat.id, errorMessage, { 
+          parse_mode: 'Markdown',
+          reply_markup: createMainKeyboard()
+        });
+      }
+    });
+  });
 });
 
 // ====== HTTP СЕРВЕР ======
