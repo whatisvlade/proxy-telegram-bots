@@ -109,7 +109,25 @@ function isManager(userId) {
 }
 
 function hasAccess(userId) {
-  return isManager(userId);
+  // Преобразуем все ID в числа для корректного сравнения
+  const userIdNum = parseInt(userId);
+  const superAdminNum = parseInt(SUPER_ADMIN_ID);
+  
+  console.log(`🔍 Проверка доступа для ID: ${userIdNum}`);
+  console.log(`🔑 Супер админ: ${superAdminNum}`);
+  console.log(`👥 Менеджеры: ${MANAGER_IDS.join(', ')}`);
+  
+  // Проверяем супер админа
+  if (userIdNum === superAdminNum) {
+    console.log(`✅ Супер админ подтвержден`);
+    return true;
+  }
+  
+  // Проверяем менеджеров
+  const isManagerResult = MANAGER_IDS.includes(userIdNum);
+  console.log(`${isManagerResult ? '✅' : '❌'} Менеджер: ${isManagerResult}`);
+  
+  return isManagerResult;
 }
 
 // Получить клиентов менеджера
