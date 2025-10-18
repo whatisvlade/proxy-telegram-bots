@@ -1,3 +1,4 @@
+// ✅ ИСПРАВЛЕННЫЙ код с дополнительной отладкой
 const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
 const fs = require('fs');
