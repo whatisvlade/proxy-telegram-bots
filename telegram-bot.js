@@ -363,6 +363,8 @@ bot.onText(/\/start/, async (msg) => {
 /status - Статус системы
 /debug - Отладочная информация
 /sync - Принудительная синхронизация с прокси сервером
+/health-detailed - Детальная информация о памяти, CPU, клиентах
+/api-stats - Полная статистика по всем клиентам
 
 🔧 **Админские команды:**
 ${isSuperAdmin(userId) ? '/manageadmins - Управление администраторами' : ''}
@@ -970,6 +972,176 @@ bot.onText(/\/status/, async (msg) => {
   message += `\n🔌 Соединение с прокси сервером: ${connectionOk ? '✅ OK' : '❌ Ошибка'}`;
 
   bot.sendMessage(msg.chat.id, message, { parse_mode: 'Markdown' });
+});
+
+// ✅ КОМАНДА: Детальная информация о памяти, CPU, клиентах
+bot.onText(/\/health-detailed/, async (msg) => {
+  const userId = msg.from.id;
+  if (!isAuthorized(userId)) {
+    return bot.sendMessage(msg.chat.id, `❌ Нет доступа. Ваш ID: ${userId}. Используйте /debug для диагностики.`);
+  }
+
+  console.log(`🔍 Команда /health-detailed от userId=${userId}`);
+
+  try {
+    const fetch = (await import('node-fetch')).default;
+    
+    // Получаем детальную информацию с прокси сервера
+    const healthResponse = await fetch(`${PROXY_SERVER_URL}/health-detailed`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      timeout: 15000
+    });
+
+    let serverHealthInfo = '';
+    if (healthResponse.ok) {
+      const healthData = await healthResponse.json();
+      serverHealthInfo = `
+🖥️ **Информация о прокси сервере:**
+• CPU: ${healthData.cpu || 'N/A'}%
+• Память: ${healthData.memory || 'N/A'}
+• Uptime: ${healthData.uptime || 'N/A'}
+• Активные соединения: ${healthData.activeConnections || 'N/A'}
+• Всего запросов: ${healthData.totalRequests || 'N/A'}
+`;
+    } else {
+      serverHealthInfo = `⚠️ Не удалось получить детальную информацию с прокси сервера (${healthResponse.status})`;
+    }
+
+    // Локальная информация
+    const totalClients = Object.keys(clientsConfig).length;
+    const totalProxies = Object.values(clientsConfig).reduce((sum, config) => sum + config.proxies.length, 0);
+    const memoryUsage = process.memoryUsage();
+    const uptime = process.uptime();
+
+    let message = `🔍 **Детальная информация системы**\n\n`;
+    
+    message += `🤖 **Telegram Bot:**\n`;
+    message += `• Память RSS: ${Math.round(memoryUsage.rss / 1024 / 1024)} MB\n`;
+    message += `• Память Heap: ${Math.round(memoryUsage.heapUsed / 1024 / 1024)} MB\n`;
+    message += `• Uptime: ${Math.floor(uptime / 3600)}ч ${Math.floor((uptime % 3600) / 60)}м\n`;
+    message += `• Клиентов: ${totalClients}\n`;
+    message += `• Прокси: ${totalProxies}\n\n`;
+
+    message += serverHealthInfo;
+
+    message += `\n📊 **Детали по клиентам:**\n`;
+    if (totalClients > 0) {
+      for (const [clientName, config] of Object.entries(clientsConfig)) {
+        message += `• **${clientName}**: ${config.proxies.length} прокси\n`;
+      }
+    } else {
+      message += `• Нет клиентов\n`;
+    }
+
+    const connectionOk = await testRailwayConnection();
+    message += `\n🔌 Соединение с прокси сервером: ${connectionOk ? '✅ OK' : '❌ Ошибка'}`;
+
+    bot.sendMessage(msg.chat.id, message, { parse_mode: 'Markdown' });
+
+  } catch (error) {
+    console.error('⚠️ Ошибка получения детальной информации:', error.message);
+    bot.sendMessage(msg.chat.id, `❌ Ошибка получения детальной информации:\n\n\`${error.message}\``, { parse_mode: 'Markdown' });
+  }
+});
+
+// ✅ КОМАНДА: Полная статистика по всем клиентам
+bot.onText(/\/api-stats/, async (msg) => {
+  const userId = msg.from.id;
+  if (!isAuthorized(userId)) {
+    return bot.sendMessage(msg.chat.id, `❌ Нет доступа. Ваш ID: ${userId}. Используйте /debug для диагностики.`);
+  }
+
+  console.log(`📊 Команда /api-stats от userId=${userId}`);
+
+  try {
+    const fetch = (await import('node-fetch')).default;
+    
+    // Получаем полную статистику с прокси сервера
+    const statsResponse = await fetch(`${PROXY_SERVER_URL}/api/stats`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      timeout: 15000
+    });
+
+    if (!statsResponse.ok) {
+      const errorText = await statsResponse.text();
+      return bot.sendMessage(msg.chat.id, `❌ Ошибка получения статистики с прокси сервера:\n\n\`${statsResponse.status}: ${errorText}\``, { parse_mode: 'Markdown' });
+    }
+
+    const statsData = await statsResponse.json();
+    
+    let message = `📊 **Полная статистика по всем клиентам**\n\n`;
+    
+    message += `🌐 **Общая информация:**\n`;
+    message += `• Всего клиентов: ${statsData.totalClients || 0}\n`;
+    message += `• Всего прокси: ${statsData.totalProxies || 0}\n`;
+    message += `• Активных соединений: ${statsData.activeConnections || 0}\n`;
+    message += `• Всего запросов: ${statsData.totalRequests || 0}\n`;
+    message += `• Успешных запросов: ${statsData.successfulRequests || 0}\n`;
+    message += `• Ошибок: ${statsData.errorRequests || 0}\n\n`;
+
+    if (statsData.clients && Object.keys(statsData.clients).length > 0) {
+      message += `👥 **Статистика по клиентам:**\n`;
+      for (const [clientName, clientStats] of Object.entries(statsData.clients)) {
+        message += `\n🔹 **${clientName}**\n`;
+        message += `   └ Прокси: ${clientStats.proxiesCount || 0} шт.\n`;
+        message += `   └ Запросов: ${clientStats.requests || 0}\n`;
+        message += `   └ Успешных: ${clientStats.successful || 0}\n`;
+        message += `   └ Ошибок: ${clientStats.errors || 0}\n`;
+        message += `   └ Последняя активность: ${clientStats.lastActivity || 'N/A'}\n`;
+        
+        if (clientStats.topProxies && clientStats.topProxies.length > 0) {
+          message += `   └ Топ прокси:\n`;
+          clientStats.topProxies.slice(0, 3).forEach((proxy, index) => {
+            message += `      ${index + 1}. ${proxy.host}:${proxy.port} (${proxy.requests} запросов)\n`;
+          });
+        }
+      }
+    } else {
+      message += `👥 **Клиенты:** Нет данных\n`;
+    }
+
+    // Разбиваем длинное сообщение на части если нужно
+    if (message.length > 4000) {
+      const parts = [];
+      let currentPart = '';
+      const lines = message.split('\n');
+      
+      for (const line of lines) {
+        if ((currentPart + line + '\n').length > 4000) {
+          parts.push(currentPart);
+          currentPart = line + '\n';
+        } else {
+          currentPart += line + '\n';
+        }
+      }
+      
+      if (currentPart) {
+        parts.push(currentPart);
+      }
+
+      for (let i = 0; i < parts.length; i++) {
+        const partMessage = i === 0 ? parts[i] : `📊 **Статистика (часть ${i + 1})**\n\n${parts[i]}`;
+        await bot.sendMessage(msg.chat.id, partMessage, { parse_mode: 'Markdown' });
+        
+        // Небольшая задержка между сообщениями
+        if (i < parts.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+    } else {
+      bot.sendMessage(msg.chat.id, message, { parse_mode: 'Markdown' });
+    }
+
+  } catch (error) {
+    console.error('⚠️ Ошибка получения статистики:', error.message);
+    bot.sendMessage(msg.chat.id, `❌ Ошибка получения статистики:\n\n\`${error.message}\``, { parse_mode: 'Markdown' });
+  }
 });
 
 // ====== HTTP СЕРВЕР ======
