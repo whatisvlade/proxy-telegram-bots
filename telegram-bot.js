@@ -1,14 +1,22 @@
-// telegram-bot.js — Telegram Bot для управления прокси клиентами
+// telegram-bot.js — Telegram Bot для управления прокси клиентами (С ОТЛАДКОЙ)
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 const fs = require('fs').promises;
 const path = require('path');
 
-// ====== КОНФИГУРАЦИЯ ======
+// ====== КОНФИГУРАЦИЯ С ОТЛАДКОЙ ======
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const ADMIN_IDS = (process.env.ADMIN_IDS || '').split(',').map(id => parseInt(id.trim())).filter(Boolean);
+const ADMIN_IDS_STRING = process.env.ADMIN_IDS || '';
+const ADMIN_IDS = ADMIN_IDS_STRING.split(',').map(id => parseInt(id.trim())).filter(Boolean);
 const SUPER_ADMIN_ID = ADMIN_IDS[0]; // Первый ID = супер-админ
 const MANAGER_IDS = ADMIN_IDS.slice(1); // Остальные = менеджеры
+
+console.log('🔐 ОТЛАДКА АВТОРИЗАЦИИ:');
+console.log(`   BOT_TOKEN: ${BOT_TOKEN ? 'УСТАНОВЛЕН' : 'НЕ УСТАНОВЛЕН'}`);
+console.log(`   ADMIN_IDS_STRING: "${ADMIN_IDS_STRING}"`);
+console.log(`   ADMIN_IDS array: [${ADMIN_IDS.join(', ')}]`);
+console.log(`   SUPER_ADMIN_ID: ${SUPER_ADMIN_ID || 'НЕ УСТАНОВЛЕН'}`);
+console.log(`   MANAGER_IDS: [${MANAGER_IDS.join(', ')}]`);
 
 const PROXY_SERVER_URL = process.env.PROXY_SERVER_URL || 'http://localhost:8080';
 const API_AUTH = Buffer.from(`${process.env.API_USERNAME || 'telegram_bot'}:${process.env.API_PASSWORD || 'bot_secret_2024'}`).toString('base64');
@@ -155,17 +163,24 @@ async function updateProxyServer() {
   }
 }
 
-// ====== ФУНКЦИИ АВТОРИЗАЦИИ ======
+// ====== ФУНКЦИИ АВТОРИЗАЦИИ С ОТЛАДКОЙ ======
 function isAuthorized(userId) {
-  return ADMIN_IDS.includes(userId);
+  const authorized = ADMIN_IDS.includes(userId);
+  console.log(`🔍 Проверка авторизации: userId=${userId}, authorized=${authorized}`);
+  console.log(`   ADMIN_IDS: [${ADMIN_IDS.join(', ')}]`);
+  return authorized;
 }
 
 function isSuperAdmin(userId) {
-  return userId === SUPER_ADMIN_ID;
+  const isSuperAdm = userId === SUPER_ADMIN_ID;
+  console.log(`👑 Проверка супер-админа: userId=${userId}, SUPER_ADMIN_ID=${SUPER_ADMIN_ID}, result=${isSuperAdm}`);
+  return isSuperAdm;
 }
 
 function isManager(userId) {
-  return MANAGER_IDS.includes(userId);
+  const isManagerResult = MANAGER_IDS.includes(userId);
+  console.log(`👥 Проверка менеджера: userId=${userId}, MANAGER_IDS=[${MANAGER_IDS.join(', ')}], result=${isManagerResult}`);
+  return isManagerResult;
 }
 
 function getUserRole(userId) {
@@ -174,13 +189,43 @@ function getUserRole(userId) {
   return 'Не авторизован';
 }
 
+// ====== ОБРАБОТЧИК ВСЕХ СООБЩЕНИЙ (ДЛЯ ОТЛАДКИ) ======
+bot.on('message', (msg) => {
+  const userId = msg.from.id;
+  const username = msg.from.username || 'без username';
+  const firstName = msg.from.first_name || 'без имени';
+  
+  console.log(`\n📨 ПОЛУЧЕНО СООБЩЕНИЕ:`);
+  console.log(`   От: ${firstName} (@${username})`);
+  console.log(`   ID: ${userId}`);
+  console.log(`   Текст: "${msg.text}"`);
+  console.log(`   Авторизован: ${isAuthorized(userId)}`);
+  console.log(`   Роль: ${getUserRole(userId)}`);
+});
+
 // ====== КОМАНДЫ БОТА ======
 bot.onText(/\/start/, async (msg) => {
   const userId = msg.from.id;
   const role = getUserRole(userId);
   
+  console.log(`🚀 Команда /start от userId=${userId}, роль=${role}`);
+  
   if (!isAuthorized(userId)) {
-    return bot.sendMessage(msg.chat.id, '❌ У вас нет доступа к этому боту.');
+    const debugMessage = `
+❌ **У вас нет доступа к этому боту.**
+
+🔍 **Отладочная информация:**
+• Ваш ID: \`${userId}\`
+• Настроенные админы: \`${ADMIN_IDS.join(', ')}\`
+• ADMIN_IDS строка: \`"${ADMIN_IDS_STRING}"\`
+• Супер-админ: \`${SUPER_ADMIN_ID || 'НЕ УСТАНОВЛЕН'}\`
+
+📝 **Для получения доступа:**
+1. Добавьте ваш ID (${userId}) в переменную ADMIN_IDS
+2. Формат: \`${userId},другие_id\`
+3. Перезапустите бота
+    `;
+    return bot.sendMessage(msg.chat.id, debugMessage, { parse_mode: 'Markdown' });
   }
   
   const welcomeMessage = `
@@ -197,6 +242,7 @@ bot.onText(/\/start/, async (msg) => {
 /remove_proxy - Удалить прокси у клиента
 /rotate_proxy - Ротировать прокси клиента
 /status - Статус системы
+/debug - Отладочная информация
 
 🔧 **Админские команды:**
 ${isSuperAdmin(userId) ? '/manage_admins - Управление администраторами' : ''}
@@ -206,9 +252,43 @@ ${isSuperAdmin(userId) ? '/manage_admins - Управление админист
   bot.sendMessage(msg.chat.id, welcomeMessage, { parse_mode: 'Markdown' });
 });
 
+bot.onText(/\/debug/, async (msg) => {
+  const userId = msg.from.id;
+  
+  const debugInfo = `
+🔍 **Отладочная информация:**
+
+👤 **Ваши данные:**
+• ID: \`${userId}\`
+• Username: @${msg.from.username || 'нет'}
+• Имя: ${msg.from.first_name || 'нет'}
+
+🔐 **Настройки авторизации:**
+• ADMIN_IDS строка: \`"${ADMIN_IDS_STRING}"\`
+• ADMIN_IDS массив: \`[${ADMIN_IDS.join(', ')}]\`
+• Супер-админ: \`${SUPER_ADMIN_ID || 'НЕ УСТАНОВЛЕН'}\`
+• Менеджеры: \`[${MANAGER_IDS.join(', ')}]\`
+
+✅ **Статус доступа:**
+• Авторизован: ${isAuthorized(userId) ? '✅ ДА' : '❌ НЕТ'}
+• Супер-админ: ${isSuperAdmin(userId) ? '✅ ДА' : '❌ НЕТ'}
+• Менеджер: ${isManager(userId) ? '✅ ДА' : '❌ НЕТ'}
+• Роль: ${getUserRole(userId)}
+
+🌐 **Настройки сервера:**
+• Прокси сервер: \`${PROXY_SERVER_URL}\`
+• Порт бота: \`${PORT}\`
+• BOT_TOKEN: ${BOT_TOKEN ? '✅ УСТАНОВЛЕН' : '❌ НЕ УСТАНОВЛЕН'}
+  `;
+  
+  bot.sendMessage(msg.chat.id, debugInfo, { parse_mode: 'Markdown' });
+});
+
 bot.onText(/\/clients/, async (msg) => {
   const userId = msg.from.id;
-  if (!isAuthorized(userId)) return;
+  if (!isAuthorized(userId)) {
+    return bot.sendMessage(msg.chat.id, `❌ Нет доступа. Ваш ID: ${userId}. Используйте /debug для диагностики.`);
+  }
   
   if (Object.keys(clientsConfig).length === 0) {
     return bot.sendMessage(msg.chat.id, '📝 Клиенты не найдены. Используйте /add_client для добавления.');
@@ -227,7 +307,9 @@ bot.onText(/\/clients/, async (msg) => {
 
 bot.onText(/\/add_client/, async (msg) => {
   const userId = msg.from.id;
-  if (!isAuthorized(userId)) return;
+  if (!isAuthorized(userId)) {
+    return bot.sendMessage(msg.chat.id, `❌ Нет доступа. Ваш ID: ${userId}. Используйте /debug для диагностики.`);
+  }
   
   bot.sendMessage(msg.chat.id, '➕ **Добавление нового клиента**\n\nВведите данные в формате:\n`имя_клиента пароль`\n\nПример: `client1 mypassword123`', { parse_mode: 'Markdown' });
   
@@ -265,7 +347,9 @@ bot.onText(/\/add_client/, async (msg) => {
 
 bot.onText(/\/delete_client/, async (msg) => {
   const userId = msg.from.id;
-  if (!isAuthorized(userId)) return;
+  if (!isAuthorized(userId)) {
+    return bot.sendMessage(msg.chat.id, `❌ Нет доступа. Ваш ID: ${userId}. Используйте /debug для диагностики.`);
+  }
   
   if (Object.keys(clientsConfig).length === 0) {
     return bot.sendMessage(msg.chat.id, '📝 Нет клиентов для удаления.');
@@ -301,7 +385,9 @@ bot.onText(/\/delete_client/, async (msg) => {
 
 bot.onText(/\/add_proxy/, async (msg) => {
   const userId = msg.from.id;
-  if (!isAuthorized(userId)) return;
+  if (!isAuthorized(userId)) {
+    return bot.sendMessage(msg.chat.id, `❌ Нет доступа. Ваш ID: ${userId}. Используйте /debug для диагностики.`);
+  }
   
   if (Object.keys(clientsConfig).length === 0) {
     return bot.sendMessage(msg.chat.id, '📝 Сначала добавьте клиента с помощью /add_client');
@@ -353,7 +439,9 @@ bot.onText(/\/add_proxy/, async (msg) => {
 
 bot.onText(/\/status/, async (msg) => {
   const userId = msg.from.id;
-  if (!isAuthorized(userId)) return;
+  if (!isAuthorized(userId)) {
+    return bot.sendMessage(msg.chat.id, `❌ Нет доступа. Ваш ID: ${userId}. Используйте /debug для диагностики.`);
+  }
   
   const totalClients = Object.keys(clientsConfig).length;
   const totalProxies = Object.values(clientsConfig).reduce((sum, config) => sum + config.proxies.length, 0);
@@ -380,8 +468,12 @@ bot.onText(/\/status/, async (msg) => {
 // ====== HTTP СЕРВЕР ======
 app.get('/', (req, res) => {
   res.send(`
-    <h1>🤖 Telegram Proxy Manager Bot</h1>
-    <p>Bot is running and ready to manage proxy clients!</p>
+    <h1>🤖 Telegram Proxy Manager Bot (Debug Mode)</h1>
+    <p>Bot is running with debug authorization!</p>
+    <p>ADMIN_IDS: "${ADMIN_IDS_STRING}"</p>
+    <p>Parsed IDs: [${ADMIN_IDS.join(', ')}]</p>
+    <p>Super Admin: ${SUPER_ADMIN_ID || 'NOT SET'}</p>
+    <p>Managers: [${MANAGER_IDS.join(', ')}]</p>
     <p>Total clients: ${Object.keys(clientsConfig).length}</p>
     <p>Total proxies: ${Object.values(clientsConfig).reduce((sum, config) => sum + config.proxies.length, 0)}</p>
   `);
@@ -391,7 +483,9 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok', 
     clients: Object.keys(clientsConfig).length,
-    proxies: Object.values(clientsConfig).reduce((sum, config) => sum + config.proxies.length, 0)
+    proxies: Object.values(clientsConfig).reduce((sum, config) => sum + config.proxies.length, 0),
+    adminIds: ADMIN_IDS,
+    superAdmin: SUPER_ADMIN_ID
   });
 });
 
@@ -409,7 +503,7 @@ async function startBot() {
     console.log(`🌐 HTTP server running on port ${PORT}`);
   });
   
-  console.log('🤖 Telegram Bot с системой ролей запущен!');
+  console.log('🤖 Telegram Bot с системой ролей запущен (DEBUG MODE)!');
   console.log(`🔑 Супер-админ: ${SUPER_ADMIN_ID}`);
   console.log(`👥 Менеджеры: ${MANAGER_IDS.join(', ')}`);
   console.log(`📁 Файл конфигурации: ${CONFIG_FILE}`);
