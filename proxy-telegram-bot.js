@@ -6,7 +6,7 @@ const path = require('path');
 const BOT_TOKEN = process.env.BOT_TOKEN || 'YOUR_BOT_TOKEN_HERE';
 
 // ID администраторов (замените на ваши Telegram ID)
-const ADMIN_IDS = process.env.ADMIN_IDS ? process.env.ADMIN_IDS.split(',').map(id => parseInt(id)) : [123456789];
+const ADMIN_IDS = process.env.ADMIN_IDS ? process.env.ADMIN_IDS.split(',').map(id => parseInt(id)) : [5361349487];
 
 // URL прокси сервера для автоматического обновления (опционально)
 const PROXY_SERVER_URL = process.env.PROXY_SERVER_URL || '';
