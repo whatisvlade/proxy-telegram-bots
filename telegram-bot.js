@@ -1,19 +1,41 @@
-// telegram-bot.js — Telegram Bot для управления прокси клиентами (CORRECTED)
+// telegram-bot.js — Telegram Bot для управления прокси клиентами (Railway Variables)
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 const fs = require('fs').promises;
 const path = require('path');
 
-// ====== КОНФИГУРАЦИЯ С ОТЛАДКОЙ ======
+// ====== КОНФИГУРАЦИЯ С ПОДДЕРЖКОЙ RAILWAY ПЕРЕМЕННЫХ ======
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const ADMIN_IDS_STRING = process.env.ADMIN_IDS || '';
-const ADMIN_IDS = ADMIN_IDS_STRING.split(',').map(id => parseInt(id.trim())).filter(Boolean);
-const SUPER_ADMIN_ID = ADMIN_IDS[0]; // Первый ID = супер-админ
-const MANAGER_IDS = ADMIN_IDS.slice(1); // Остальные = менеджеры
+
+// ✅ ПОДДЕРЖКА РАЗНЫХ ФОРМАТОВ ПЕРЕМЕННЫХ
+let ADMIN_IDS = [];
+let SUPER_ADMIN_ID = null;
+let MANAGER_IDS = [];
+
+// Вариант 1: Единая переменная ADMIN_IDS
+if (process.env.ADMIN_IDS) {
+  ADMIN_IDS = process.env.ADMIN_IDS.split(',').map(id => parseInt(id.trim())).filter(Boolean);
+  SUPER_ADMIN_ID = ADMIN_IDS[0];
+  MANAGER_IDS = ADMIN_IDS.slice(1);
+}
+// Вариант 2: Отдельные переменные SUPER_ADMIN и MANAGER_IDS
+else {
+  if (process.env.SUPER_ADMIN) {
+    SUPER_ADMIN_ID = parseInt(process.env.SUPER_ADMIN.trim());
+    ADMIN_IDS.push(SUPER_ADMIN_ID);
+  }
+  
+  if (process.env.MANAGER_IDS) {
+    MANAGER_IDS = process.env.MANAGER_IDS.split(',').map(id => parseInt(id.trim())).filter(Boolean);
+    ADMIN_IDS.push(...MANAGER_IDS);
+  }
+}
 
 console.log('🔐 ОТЛАДКА АВТОРИЗАЦИИ:');
 console.log(`   BOT_TOKEN: ${BOT_TOKEN ? 'УСТАНОВЛЕН' : 'НЕ УСТАНОВЛЕН'}`);
-console.log(`   ADMIN_IDS_STRING: "${ADMIN_IDS_STRING}"`);
+console.log(`   ADMIN_IDS env: "${process.env.ADMIN_IDS || 'НЕ УСТАНОВЛЕНА'}"`);
+console.log(`   SUPER_ADMIN env: "${process.env.SUPER_ADMIN || 'НЕ УСТАНОВЛЕНА'}"`);
+console.log(`   MANAGER_IDS env: "${process.env.MANAGER_IDS || 'НЕ УСТАНОВЛЕНА'}"`);
 console.log(`   ADMIN_IDS array: [${ADMIN_IDS.join(', ')}]`);
 console.log(`   SUPER_ADMIN_ID: ${SUPER_ADMIN_ID || 'НЕ УСТАНОВЛЕН'}`);
 console.log(`   MANAGER_IDS: [${MANAGER_IDS.join(', ')}]`);
@@ -27,7 +49,7 @@ const PORT = process.env.PORT || 8080;
 // ====== ИНИЦИАЛИЗАЦИЯ ======
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 const app = express();
-app.use(express.json({ limit: '10mb' })); // Увеличиваем лимит для больших списков прокси
+app.use(express.json({ limit: '10mb' }));
 
 let clientsConfig = {};
 
@@ -75,14 +97,12 @@ async function testRailwayConnection() {
   }
 }
 
-// ✅ ИСПРАВЛЕНО: Полностью переписана функция синхронизации с правильными API endpoints
 async function updateProxyServer() {
   try {
     const fetch = (await import('node-fetch')).default;
     
     console.log('🔄 Начинаем синхронизацию с прокси сервером...');
     console.log(`🌐 Прокси сервер URL: ${PROXY_SERVER_URL}`);
-    console.log(`🔐 API Auth: Basic ${API_AUTH.substring(0, 10)}...`);
     
     // Получаем текущих клиентов с прокси сервера
     console.log('📥 Получаем список клиентов с прокси сервера...');
@@ -143,7 +163,6 @@ async function updateProxyServer() {
       if (!currentClients.includes(clientName)) {
         console.log(`➕ Добавляем клиента на прокси сервер: ${clientName}`);
         
-        // ✅ ИСПРАВЛЕНО: Правильная структура данных для API
         const requestBody = {
           clientName: clientName,
           password: config.password,
@@ -223,7 +242,6 @@ function parseProxyList(proxyText) {
     
     if (parts.length === 4) {
       const [host, port, user, pass] = parts;
-      // ✅ ИСПРАВЛЕНО: Правильный формат для прокси сервера
       const proxyUrl = `http://${user}:${pass}@${host}:${port}`;
       proxies.push(proxyUrl);
       console.log(`✅ Парсинг прокси ${i + 1}: ${host}:${port} -> ${proxyUrl}`);
@@ -265,14 +283,22 @@ bot.onText(/\/start/, async (msg) => {
 
 🔍 **Отладочная информация:**
 • Ваш ID: \`${userId}\`
-• Настроенные админы: \`${ADMIN_IDS.join(', ')}\`
-• ADMIN_IDS строка: \`"${ADMIN_IDS_STRING}"\`
+• ADMIN_IDS env: \`"${process.env.ADMIN_IDS || 'НЕ УСТАНОВЛЕНА'}"\`
+• SUPER_ADMIN env: \`"${process.env.SUPER_ADMIN || 'НЕ УСТАНОВЛЕНА'}"\`
+• MANAGER_IDS env: \`"${process.env.MANAGER_IDS || 'НЕ УСТАНОВЛЕНА'}"\`
+• Настроенные админы: \`[${ADMIN_IDS.join(', ')}]\`
 • Супер-админ: \`${SUPER_ADMIN_ID || 'НЕ УСТАНОВЛЕН'}\`
 
-📝 **Для получения доступа:**
-1. Добавьте ваш ID (${userId}) в переменную ADMIN_IDS
-2. Формат: \`${userId},другие_id\`
-3. Перезапустите бота
+📝 **Для получения доступа (выберите один способ):**
+
+**Способ 1:** Добавьте переменную \`ADMIN_IDS\`
+• Значение: \`${userId}\`
+
+**Способ 2:** Установите \`SUPER_ADMIN\`
+• Значение: \`${userId}\`
+
+**Способ 3:** Добавьте в \`MANAGER_IDS\`
+• Значение: \`${userId}\`
     `;
     return bot.sendMessage(msg.chat.id, debugMessage, { parse_mode: 'Markdown' });
   }
@@ -312,8 +338,12 @@ bot.onText(/\/debug/, async (msg) => {
 • Username: @${msg.from.username || 'нет'}
 • Имя: ${msg.from.first_name || 'нет'}
 
-🔐 **Настройки авторизации:**
-• ADMIN_IDS строка: \`"${ADMIN_IDS_STRING}"\`
+🔐 **Переменные окружения:**
+• ADMIN_IDS: \`"${process.env.ADMIN_IDS || 'НЕ УСТАНОВЛЕНА'}"\`
+• SUPER_ADMIN: \`"${process.env.SUPER_ADMIN || 'НЕ УСТАНОВЛЕНА'}"\`
+• MANAGER_IDS: \`"${process.env.MANAGER_IDS || 'НЕ УСТАНОВЛЕНА'}"\`
+
+📊 **Обработанные значения:**
 • ADMIN_IDS массив: \`[${ADMIN_IDS.join(', ')}]\`
 • Супер-админ: \`${SUPER_ADMIN_ID || 'НЕ УСТАНОВЛЕН'}\`
 • Менеджеры: \`[${MANAGER_IDS.join(', ')}]\`
@@ -354,7 +384,6 @@ bot.onText(/\/clients/, async (msg) => {
   bot.sendMessage(msg.chat.id, message, { parse_mode: 'Markdown' });
 });
 
-// ✅ КОМАНДА: Быстрое добавление клиента
 bot.onText(/\/addclient/, async (msg) => {
   const userId = msg.from.id;
   if (!isAuthorized(userId)) {
@@ -404,7 +433,6 @@ bot.onText(/\/addclient/, async (msg) => {
     await saveConfig();
     console.log(`✅ Клиент ${clientName} добавлен локально`);
     
-    // Обновляем прокси сервер
     const updateResult = await updateProxyServer();
     
     if (updateResult.success) {
@@ -415,7 +443,6 @@ bot.onText(/\/addclient/, async (msg) => {
   });
 });
 
-// ✅ КОМАНДА: Добавление клиента со списком прокси
 bot.onText(/\/addclientbulk/, async (msg) => {
   const userId = msg.from.id;
   if (!isAuthorized(userId)) {
@@ -457,7 +484,6 @@ client1 mypassword123
       return bot.sendMessage(msg.chat.id, '❌ Пустое сообщение. Введите данные клиента и прокси.', { parse_mode: 'Markdown' });
     }
     
-    // Парсим первую строку как данные клиента
     const clientParts = lines[0].split(' ');
     console.log(`👤 Первая строка: "${lines[0]}"`);
     console.log(`🔍 Части клиента: [${clientParts.join(', ')}]`);
@@ -473,7 +499,6 @@ client1 mypassword123
       return bot.sendMessage(msg.chat.id, `❌ Клиент **${clientName}** уже существует.`, { parse_mode: 'Markdown' });
     }
     
-    // Парсим остальные строки как прокси
     const proxyLines = lines.slice(1);
     console.log(`🌐 Строк с прокси: ${proxyLines.length}`);
     
@@ -486,7 +511,6 @@ client1 mypassword123
       errors = parseResult.errors;
     }
     
-    // Создаем клиента
     clientsConfig[clientName] = {
       password,
       proxies
@@ -495,7 +519,6 @@ client1 mypassword123
     await saveConfig();
     console.log(`✅ Клиент ${clientName} добавлен локально с ${proxies.length} прокси`);
     
-    // Обновляем прокси сервер
     const updateResult = await updateProxyServer();
     
     let resultMessage = `✅ Клиент **${clientName}** успешно добавлен!\n\n`;
@@ -520,7 +543,6 @@ client1 mypassword123
   });
 });
 
-// ✅ КОМАНДА: Принудительная синхронизация
 bot.onText(/\/sync/, async (msg) => {
   const userId = msg.from.id;
   if (!isAuthorized(userId)) {
@@ -561,7 +583,6 @@ bot.onText(/\/status/, async (msg) => {
     }
   }
   
-  // Проверяем соединение с прокси сервером
   const connectionOk = await testRailwayConnection();
   message += `\n🔌 Соединение с прокси сервером: ${connectionOk ? '✅ OK' : '❌ Ошибка'}`;
   
@@ -571,10 +592,12 @@ bot.onText(/\/status/, async (msg) => {
 // ====== HTTP СЕРВЕР ======
 app.get('/', (req, res) => {
   res.send(`
-    <h1>🤖 Telegram Proxy Manager Bot (CORRECTED)</h1>
-    <p>Bot is running with corrected API communication!</p>
-    <p>ADMIN_IDS: "${ADMIN_IDS_STRING}"</p>
-    <p>Parsed IDs: [${ADMIN_IDS.join(', ')}]</p>
+    <h1>🤖 Telegram Proxy Manager Bot (Railway Variables)</h1>
+    <p>Bot is running with Railway variables support!</p>
+    <p>ADMIN_IDS env: "${process.env.ADMIN_IDS || 'NOT SET'}"</p>
+    <p>SUPER_ADMIN env: "${process.env.SUPER_ADMIN || 'NOT SET'}"</p>
+    <p>MANAGER_IDS env: "${process.env.MANAGER_IDS || 'NOT SET'}"</p>
+    <p>Parsed ADMIN_IDS: [${ADMIN_IDS.join(', ')}]</p>
     <p>Super Admin: ${SUPER_ADMIN_ID || 'NOT SET'}</p>
     <p>Managers: [${MANAGER_IDS.join(', ')}]</p>
     <p>Total clients: ${Object.keys(clientsConfig).length}</p>
@@ -590,33 +613,33 @@ app.get('/health', (req, res) => {
     proxies: Object.values(clientsConfig).reduce((sum, config) => sum + config.proxies.length, 0),
     adminIds: ADMIN_IDS,
     superAdmin: SUPER_ADMIN_ID,
-    proxyServerUrl: PROXY_SERVER_URL
+    managers: MANAGER_IDS,
+    proxyServerUrl: PROXY_SERVER_URL,
+    envVars: {
+      ADMIN_IDS: process.env.ADMIN_IDS || 'NOT SET',
+      SUPER_ADMIN: process.env.SUPER_ADMIN || 'NOT SET',
+      MANAGER_IDS: process.env.MANAGER_IDS || 'NOT SET'
+    }
   });
 });
 
 // ====== ЗАПУСК ======
 async function startBot() {
   await loadConfig();
-  
-  // Тестируем соединение с прокси сервером
   await testRailwayConnection();
-  
-  // Синхронизируем с прокси сервером
   await updateProxyServer();
   
   app.listen(PORT, () => {
     console.log(`🌐 HTTP server running on port ${PORT}`);
   });
   
-  console.log('🤖 Telegram Bot с системой ролей запущен (CORRECTED)!');
+  console.log('🤖 Telegram Bot с поддержкой Railway переменных запущен!');
   console.log(`🔑 Супер-админ: ${SUPER_ADMIN_ID}`);
   console.log(`👥 Менеджеры: ${MANAGER_IDS.join(', ')}`);
   console.log(`📁 Файл конфигурации: ${CONFIG_FILE}`);
   console.log(`🌐 Прокси сервер URL: ${PROXY_SERVER_URL}`);
-  console.log(`🔐 API Auth: ${process.env.API_USERNAME || 'telegram_bot'}:${process.env.API_PASSWORD || 'bot_secret_2024'}`);
 }
 
-// Обработка ошибок
 bot.on('error', (error) => {
   console.error('❌ Telegram Bot Error:', error.message);
 });
