@@ -158,16 +158,29 @@ async function buyProxy6Proxies() {
 // Функция для проверки и форматирования прокси
 function formatProxyForRailway(proxy) {
     // PROXY6.net возвращает: { host, port, user, pass, type }
-    // Railway ожидает: "host:port:user:pass" или объект
-    
+    // Railway ожидает: "http://user:pass@host:port"
+
     if (typeof proxy === 'string') {
-        return proxy; // Уже в правильном формате
+        // Если уже в формате http://user:pass@host:port
+        if (proxy.startsWith('http://') && proxy.includes('@')) {
+            return proxy;
+        }
+        
+        // Если в формате host:port:user:pass - конвертируем
+        const parts = proxy.split(':');
+        if (parts.length === 4) {
+            const [host, port, user, pass] = parts;
+            return `http://${user}:${pass}@${host}:${port}`;
+        }
+        
+        return proxy; // Возвращаем как есть
     }
-    
+
+    // Если объект от PROXY6.net
     if (proxy.host && proxy.port && proxy.user && proxy.pass) {
-        return `${proxy.host}:${proxy.port}:${proxy.user}:${proxy.pass}`;
+        return `http://${proxy.user}:${proxy.pass}@${proxy.host}:${proxy.port}`;
     }
-    
+
     console.error('❌ Неверный формат прокси:', proxy);
     return null;
 }
