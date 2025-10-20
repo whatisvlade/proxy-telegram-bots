@@ -12,7 +12,7 @@ const PROXY_SERVER_URL = process.env.PROXY_SERVER_URL || 'https://railway-proxy-
 const PROXY6_CONFIG = {
     API_KEY: process.env.PROXY6_API_KEY,
     BASE_URL: 'https://px6.link/api',
-    DEFAULT_COUNT: 30,
+    DEFAULT_COUNT: 3,
     DEFAULT_PERIOD: 7,
     DEFAULT_COUNTRY: 'ru',
     DEFAULT_VERSION: 3 // IPv4 Shared
@@ -192,7 +192,7 @@ async function proxy6Request(method, params = {}) {
         const queryParams = new URLSearchParams(params).toString();
         const url = `${PROXY6_CONFIG.BASE_URL}/${PROXY6_CONFIG.API_KEY}/${method}${queryParams ? '?' + queryParams : ''}`;
         
-        console.log(`🌐 PROXY6 запрос: ${url}`);
+        // console.log(`🌐 PROXY6 запрос: ${url}`); // Убираем для уменьшения логов
         
         const response = await axios.get(url, {
             timeout: 10000,
@@ -201,7 +201,7 @@ async function proxy6Request(method, params = {}) {
             }
         });
 
-        console.log(`📥 PROXY6 ответ:`, response.data);
+        // console.log(`📥 PROXY6 ответ:`, response.data); // Убираем для уменьшения логов
         return response.data;
     } catch (error) {
         console.error('❌ Ошибка PROXY6 запроса:', error.message);
@@ -1149,3 +1149,6 @@ app.get('/health', (req, res) => {
 app.listen(PORT, () => {
     console.log(`🌐 Health endpoint доступен на порту ${PORT}`);
 });
+
+
+что нужно поменять ?
