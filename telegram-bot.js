@@ -148,7 +148,7 @@ async function getProxy6Price(count = 30, period = 7, version = 3) {
     }
 }
 
-async function buyProxy6Proxies(count = 1, period = 7, country = 'ru', version = 4, type = 'http') {
+async function buyProxy6Proxies(count = 1, period = 7, country = 'ru', version = 3, type = 'http') {
     try {
         const response = await axios.get(`${PROXY6_BASE_URL}/${PROXY6_API_KEY}/buy`, {
             params: {
@@ -301,6 +301,12 @@ function getAdminKeyboard() {
     };
 }
 
+// Функция для очистки состояния пользователя
+function clearUserState(userId) {
+    delete userStates[userId];
+    saveUserStates();
+}
+
 // Обработчики команд
 bot.onText(/^\/start$/, async (msg) => {
     const userId = msg.from.id;
@@ -308,6 +314,9 @@ bot.onText(/^\/start$/, async (msg) => {
     if (!isAdmin(userId)) {
         return bot.sendMessage(userId, '❌ У вас нет доступа к этому боту.');
     }
+    
+    // Очищаем состояние при старте
+    clearUserState(userId);
     
     const welcomeMessage = `🤖 Добро пожаловать в Proxy Manager Bot!
 
@@ -381,10 +390,24 @@ bot.on('message', async (msg) => {
         return bot.sendMessage(userId, `✅ Админ ${adminId} успешно удален!`);
     }
     
-    // Обработка состояний пользователей
+    // Проверяем, есть ли состояние у пользователя
     if (userStates[userId]) {
-        await handleUserState(userId, text);
-        return;
+        // Проверяем, не является ли это кнопкой меню
+        const menuButtons = [
+            '➕ Добавить клиента', '➖ Удалить клиента', '📋 Список клиентов', 
+            '🔄 Ротация прокси', '💰 Баланс PROXY6', '🛒 Купить прокси',
+            '👥 Управление админами', '➕ Добавить админа', '➖ Удалить админа',
+            '📋 Список админов', '🔙 Назад'
+        ];
+        
+        if (menuButtons.includes(text)) {
+            // Очищаем состояние и обрабатываем как обычную кнопку
+            clearUserState(userId);
+        } else {
+            // Обрабатываем как ввод в состоянии
+            await handleUserState(userId, text);
+            return;
+        }
     }
     
     // Обработка кнопок главного меню
@@ -440,6 +463,7 @@ bot.on('message', async (msg) => {
             break;
             
         case '🔙 Назад':
+            clearUserState(userId);
             await bot.sendMessage(userId, '🏠 Главное меню:', {
                 reply_markup: getMainKeyboard()
             });
@@ -538,8 +562,7 @@ async function handleAddClientPassword(userId, password) {
         });
     }
     
-    delete userStates[userId];
-    await saveUserStates();
+    clearUserState(userId);
 }
 
 // Функции обработки удаления клиента
@@ -576,8 +599,7 @@ async function handleDeleteClient(userId, clientName) {
         });
     }
     
-    delete userStates[userId];
-    await saveUserStates();
+    clearUserState(userId);
 }
 
 // Функции обработки списка клиентов
@@ -649,8 +671,7 @@ async function handleRotateProxy(userId, clientName) {
         });
     }
     
-    delete userStates[userId];
-    await saveUserStates();
+    clearUserState(userId);
 }
 
 // Функции обработки баланса PROXY6
@@ -696,8 +717,7 @@ async function handleBuyProxyStart(userId) {
 
 async function handleBuyProxyClient(userId, clientName) {
     if (!PROXY6_API_KEY) {
-        delete userStates[userId];
-        await saveUserStates();
+        clearUserState(userId);
         return bot.sendMessage(userId, '❌ PROXY6 API ключ не настроен.', {
             reply_markup: getMainKeyboard()
         });
@@ -708,8 +728,7 @@ async function handleBuyProxyClient(userId, clientName) {
     const buyResult = await buyProxy6Proxies(30, 7, 'ru', 4, 'http');
     
     if (!buyResult.success) {
-        delete userStates[userId];
-        await saveUserStates();
+        clearUserState(userId);
         return bot.sendMessage(userId, `❌ Ошибка покупки прокси: ${buyResult.error}`, {
             reply_markup: getMainKeyboard()
         });
@@ -733,8 +752,7 @@ async function handleBuyProxyClient(userId, clientName) {
         { reply_markup: getMainKeyboard() }
     );
     
-    delete userStates[userId];
-    await saveUserStates();
+    clearUserState(userId);
 }
 
 // Функции управления админами
@@ -759,8 +777,7 @@ async function handleAddAdmin(userId, adminIdText) {
     }
     
     if (admins.hasOwnProperty(adminId.toString())) {
-        delete userStates[userId];
-        await saveUserStates();
+        clearUserState(userId);
         return bot.sendMessage(userId, '❌ Этот пользователь уже является админом.', {
             reply_markup: getAdminKeyboard()
         });
@@ -774,8 +791,7 @@ async function handleAddAdmin(userId, adminIdText) {
     
     await saveAdmins();
     
-    delete userStates[userId];
-    await saveUserStates();
+    clearUserState(userId);
     
     await bot.sendMessage(userId, `✅ Админ ${adminId} успешно добавлен!`, {
         reply_markup: getAdminKeyboard()
@@ -811,16 +827,14 @@ async function handleDeleteAdmin(userId, adminIdText) {
     }
     
     if (adminId === SUPER_ADMIN_ID) {
-        delete userStates[userId];
-        await saveUserStates();
+        clearUserState(userId);
         return bot.sendMessage(userId, '❌ Нельзя удалить супер-админа.', {
             reply_markup: getAdminKeyboard()
         });
     }
     
     if (!admins.hasOwnProperty(adminId.toString())) {
-        delete userStates[userId];
-        await saveUserStates();
+        clearUserState(userId);
         return bot.sendMessage(userId, '❌ Этот пользователь не является админом.', {
             reply_markup: getAdminKeyboard()
         });
@@ -829,8 +843,7 @@ async function handleDeleteAdmin(userId, adminIdText) {
     delete admins[adminId.toString()];
     await saveAdmins();
     
-    delete userStates[userId];
-    await saveUserStates();
+    clearUserState(userId);
     
     await bot.sendMessage(userId, `✅ Админ ${adminId} успешно удален!`, {
         reply_markup: getAdminKeyboard()
