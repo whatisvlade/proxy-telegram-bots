@@ -12,7 +12,7 @@ const PROXY_SERVER_URL = process.env.PROXY_SERVER_URL || 'https://railway-proxy-
 const PROXY6_CONFIG = {
     API_KEY: process.env.PROXY6_API_KEY,
     BASE_URL: 'https://px6.link/api',
-    DEFAULT_COUNT: 25,
+    DEFAULT_COUNT: 1,
     DEFAULT_PERIOD: 7,
     DEFAULT_COUNTRY: 'ru',
     DEFAULT_VERSION: 3 // IPv4 Shared
@@ -315,6 +315,11 @@ async function deleteClientFromServer(clientName) {
         console.error('❌ Ошибка удаления клиента с сервера:', error.message);
         if (error.response) {
             console.log('📥 Ответ с ошибкой:', error.response.data);
+            // Если клиент не найден на сервере (404), это не критическая ошибка
+            if (error.response.status === 404) {
+                console.log('ℹ️ Клиент уже отсутствует на сервере');
+                return { success: true, data: { message: 'Client not found on server' } };
+            }
         }
         return { success: false, error: error.message };
     }
@@ -547,7 +552,7 @@ bot.on('message', async (msg) => {
         }
 
         userStates[userId] = { action: 'adding_proxy' };
-        
+
         let message = `➕ Добавление прокси
 
 📝 Отправьте данные в формате:
@@ -729,7 +734,7 @@ bot.on('message', async (msg) => {
     // Это предотвращает случайную обработку текста кнопок как данных для добавления клиента
     const buttonCommands = [
         '👤 Добавить клиента', '🗑️ Удалить клиента', '➕ Добавить прокси', '➖ Удалить прокси',
-        '📋 Мои клиенты', '📋 Все клиенты', '🔄 Ротация прокси', '💰 Баланс PROXY6', 
+        '📋 Мои клиенты', '📋 Все клиенты', '🔄 Ротация прокси', '💰 Баланс PROXY6',
         '🛒 Купить прокси', '🌐 Текущий прокси', '🌍 Мой IP', '👥 Управление админами', '🔄 Перезапуск'
     ];
 
@@ -867,8 +872,8 @@ bot.on('message', async (msg) => {
             const proxyLines = lines.slice(1);
 
             // Находим клиента
-            const clientInfo = superAdmin ? 
-                findClientByName(clientName) : 
+            const clientInfo = superAdmin ?
+                findClientByName(clientName) :
                 findClientByName(clientName, userId);
 
             if (!clientInfo) {
@@ -1018,11 +1023,7 @@ bot.on('callback_query', async (callbackQuery) => {
             return;
         }
 
-        // Удаляем клиента локально
-        delete adminClients[clientName];
-        saveClients();
-
-        // Удаляем с прокси сервера (исправленный запрос)
+        // Сначала удаляем клиента с прокси сервера
         try {
             const deleteResult = await deleteClientFromServer(clientName);
             if (deleteResult.success) {
@@ -1033,6 +1034,10 @@ bot.on('callback_query', async (callbackQuery) => {
         } catch (error) {
             console.error('❌ Ошибка удаления клиента с сервера:', error);
         }
+
+        // Затем удаляем клиента локально
+        delete adminClients[clientName];
+        saveClients();
 
         await bot.editMessageText(
             `✅ Клиент ${clientName} успешно удален
@@ -1172,10 +1177,14 @@ bot.on('callback_query', async (callbackQuery) => {
         try {
             await makeProxyServerRequest('/api/remove-proxy', 'DELETE', {
                 clientName: clientName,
-                proxy: removedProxy
+                proxy: formatProxyForRailway(removedProxy)
             });
         } catch (error) {
             console.error('❌ Ошибка удаления прокси на сервере:', error);
+            // Если прокси не найден на сервере (404), это не критическая ошибка
+            if (error.response && error.response.status === 404) {
+                console.log('ℹ️ Прокси уже отсутствует на сервере, продолжаем...');
+            }
         }
 
         await bot.editMessageText(
@@ -1381,14 +1390,14 @@ function formatProxyForRailway(proxy) {
         if (proxy.startsWith('http://') && proxy.includes('@')) {
             return proxy;
         }
-        
+
         // Если в формате host:port:user:pass - конвертируем
         const parts = proxy.split(':');
         if (parts.length === 4) {
             const [host, port, user, pass] = parts;
             return `http://${user}:${pass}@${host}:${port}`;
         }
-        
+
         return proxy; // Возвращаем как есть
     }
 
