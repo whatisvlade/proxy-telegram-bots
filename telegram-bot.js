@@ -13,7 +13,7 @@ const PORT = process.env.PORT || 8080;
 // Настройки PROXY6
 const PROXY6_CONFIG = {
     country: 'RU',
-    count: 30,
+    count: 1,
     period: 7,
     version: 4
 };
