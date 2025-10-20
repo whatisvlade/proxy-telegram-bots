@@ -1,21 +1,21 @@
 {
-  "name": "proxy-manager-telegram-bot",
+  "name": "telegram-proxy-bot",
   "version": "1.0.0",
-  "description": "Telegram bot for managing proxy clients",
+  "description": "Telegram bot for proxy management with multi-admin support",
   "main": "telegram-bot.js",
   "scripts": {
     "start": "node telegram-bot.js",
     "dev": "nodemon telegram-bot.js"
   },
   "dependencies": {
-    "node-telegram-bot-api": "^0.64.0",
-    "express": "^4.18.2",
-    "node-fetch": "^3.3.2"
+    "node-telegram-bot-api": "^0.66.0",
+    "axios": "^1.6.0",
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
   },
   "engines": {
-    "node": ">=18.0.0"
-  },
-  "keywords": ["telegram", "bot", "proxy", "manager"],
-  "author": "Your Name",
-  "license": "MIT"
+    "node": ">=16.0.0"
+  }
 }
