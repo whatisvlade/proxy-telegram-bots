@@ -191,9 +191,9 @@ async function proxy6Request(method, params = {}) {
 
         const queryParams = new URLSearchParams(params).toString();
         const url = `${PROXY6_CONFIG.BASE_URL}/${PROXY6_CONFIG.API_KEY}/${method}${queryParams ? '?' + queryParams : ''}`;
-        
+
         // console.log(`🌐 PROXY6 запрос: ${url}`); // Убираем для уменьшения логов
-        
+
         const response = await axios.get(url, {
             timeout: 10000,
             headers: {
@@ -317,7 +317,7 @@ async function getCurrentProxy(clientName, password) {
             username: clientName,
             password: password
         };
-        
+
         const response = await makeProxyServerRequest(`/current`, 'GET', null, auth);
         return response;
     } catch (error) {
@@ -331,7 +331,7 @@ async function getMyIP(clientName, password) {
             username: clientName,
             password: password
         };
-        
+
         const response = await makeProxyServerRequest(`/myip`, 'GET', null, auth);
         return response;
     } catch (error) {
@@ -414,10 +414,10 @@ bot.on('message', async (msg) => {
 
     if (text === '🗑️ Удалить клиента' || text === '/deleteclient') {
         console.log(`🗑️ Команда удаления клиента от userId=${userId}`);
-        
+
         const adminClients = superAdmin ? getAllClients() : getAdminClients(userId);
         const clientNames = Object.keys(adminClients);
-        
+
         if (clientNames.length === 0) {
             await bot.sendMessage(chatId, '❌ Нет доступных клиентов для удаления');
             return;
@@ -427,9 +427,9 @@ bot.on('message', async (msg) => {
             reply_markup: {
                 inline_keyboard: clientNames.map(name => {
                     const client = adminClients[name];
-                    const displayName = superAdmin && client.originalName ? 
+                    const displayName = superAdmin && client.originalName ?
                         `${client.originalName} (Admin: ${client.adminId})` : name;
-                    
+
                     return [{
                         text: `🗑️ ${displayName}`,
                         callback_data: `delete_${name}_${superAdmin ? client.adminId || userId : userId}`
@@ -444,10 +444,10 @@ bot.on('message', async (msg) => {
 
     if (text === '📋 Мои клиенты' || text === '📋 Все клиенты' || text === '/clients') {
         console.log(`📋 Команда /clients от userId=${userId}`);
-        
+
         const adminClients = superAdmin ? getAllClients() : getAdminClients(userId);
         const clientNames = Object.keys(adminClients);
-        
+
         if (clientNames.length === 0) {
             await bot.sendMessage(chatId, '📋 Список клиентов пуст');
             return;
@@ -455,10 +455,10 @@ bot.on('message', async (msg) => {
 
         let message = `📋 Список ${superAdmin ? 'всех' : 'ваших'} клиентов:\n\n`;
         for (const [name, client] of Object.entries(adminClients)) {
-            const displayName = superAdmin && client.originalName ? 
+            const displayName = superAdmin && client.originalName ?
                 `${client.originalName} (Admin: ${client.adminId})` : name;
             const proxyCount = client.proxies ? client.proxies.length : 0;
-            
+
             message += `👤 ${displayName}\n`;
             message += `   🔐 Пароль: ${client.password}\n`;
             message += `   🌐 Прокси: ${proxyCount} шт.\n\n`;
@@ -470,14 +470,14 @@ bot.on('message', async (msg) => {
 
     if (text === '💰 Баланс PROXY6' || text === '/proxy6-balance') {
         console.log(`💰 Команда /proxy6-balance от userId=${userId}`);
-        
+
         if (!PROXY6_CONFIG.API_KEY) {
             await bot.sendMessage(chatId, '❌ API ключ PROXY6.net не настроен');
             return;
         }
 
         const balanceResult = await checkProxy6Balance();
-        
+
         if (balanceResult.success) {
             const message = `💰 Баланс PROXY6.net:
 💵 ${balanceResult.balance} ${balanceResult.currency}
@@ -491,7 +491,7 @@ bot.on('message', async (msg) => {
 
     if (text === '🛒 Купить прокси' || text === '/buy-proxies') {
         console.log(`🛒 Команда /buy-proxies от userId=${userId}`);
-        
+
         if (!PROXY6_CONFIG.API_KEY) {
             await bot.sendMessage(chatId, '❌ API ключ PROXY6.net не настроен');
             return;
@@ -499,7 +499,7 @@ bot.on('message', async (msg) => {
 
         const adminClients = superAdmin ? getAllClients() : getAdminClients(userId);
         const clientNames = Object.keys(adminClients);
-        
+
         if (clientNames.length === 0) {
             await bot.sendMessage(chatId, '❌ Нет доступных клиентов');
             return;
@@ -509,10 +509,10 @@ bot.on('message', async (msg) => {
             reply_markup: {
                 inline_keyboard: clientNames.map(name => {
                     const client = adminClients[name];
-                    const displayName = superAdmin && client.originalName ? 
+                    const displayName = superAdmin && client.originalName ?
                         `${client.originalName} (Admin: ${client.adminId})` : name;
                     const proxyCount = client.proxies ? client.proxies.length : 0;
-                    
+
                     return [{
                         text: `${displayName} (${proxyCount} прокси)`,
                         callback_data: `buy_proxy_${name}_${superAdmin ? client.adminId || userId : userId}`
@@ -527,10 +527,10 @@ bot.on('message', async (msg) => {
 
     if (text === '🔄 Ротация прокси' || text === '/rotate') {
         console.log(`🔄 Команда /rotate от userId=${userId}`);
-        
+
         const adminClients = superAdmin ? getAllClients() : getAdminClients(userId);
         const clientNames = Object.keys(adminClients);
-        
+
         if (clientNames.length === 0) {
             await bot.sendMessage(chatId, '❌ Нет доступных клиентов');
             return;
@@ -540,9 +540,9 @@ bot.on('message', async (msg) => {
             reply_markup: {
                 inline_keyboard: clientNames.map(name => {
                     const client = adminClients[name];
-                    const displayName = superAdmin && client.originalName ? 
+                    const displayName = superAdmin && client.originalName ?
                         `${client.originalName} (Admin: ${client.adminId})` : name;
-                    
+
                     return [{
                         text: `🔄 ${displayName}`,
                         callback_data: `rotate_${name}_${superAdmin ? client.adminId || userId : userId}`
@@ -557,10 +557,10 @@ bot.on('message', async (msg) => {
 
     if (text === '🌐 Текущий прокси' || text === '/current-proxy') {
         console.log(`🌐 Команда /current-proxy от userId=${userId}`);
-        
+
         const adminClients = superAdmin ? getAllClients() : getAdminClients(userId);
         const clientNames = Object.keys(adminClients);
-        
+
         if (clientNames.length === 0) {
             await bot.sendMessage(chatId, '❌ Нет доступных клиентов');
             return;
@@ -570,9 +570,9 @@ bot.on('message', async (msg) => {
             reply_markup: {
                 inline_keyboard: clientNames.map(name => {
                     const client = adminClients[name];
-                    const displayName = superAdmin && client.originalName ? 
+                    const displayName = superAdmin && client.originalName ?
                         `${client.originalName} (Admin: ${client.adminId})` : name;
-                    
+
                     return [{
                         text: `🌐 ${displayName}`,
                         callback_data: `current_${name}_${superAdmin ? client.adminId || userId : userId}`
@@ -587,10 +587,10 @@ bot.on('message', async (msg) => {
 
     if (text === '🌍 Мой IP' || text === '/myip') {
         console.log(`🌍 Команда /myip от userId=${userId}`);
-        
+
         const adminClients = superAdmin ? getAllClients() : getAdminClients(userId);
         const clientNames = Object.keys(adminClients);
-        
+
         if (clientNames.length === 0) {
             await bot.sendMessage(chatId, '❌ Нет доступных клиентов');
             return;
@@ -600,9 +600,9 @@ bot.on('message', async (msg) => {
             reply_markup: {
                 inline_keyboard: clientNames.map(name => {
                     const client = adminClients[name];
-                    const displayName = superAdmin && client.originalName ? 
+                    const displayName = superAdmin && client.originalName ?
                         `${client.originalName} (Admin: ${client.adminId})` : name;
-                    
+
                     return [{
                         text: `🌍 ${displayName}`,
                         callback_data: `myip_${name}_${superAdmin ? client.adminId || userId : userId}`
@@ -650,18 +650,18 @@ bot.on('message', async (msg) => {
     // Обработка состояний пользователей
     if (userStates[userId]) {
         const state = userStates[userId];
-        
+
         if (state.action === 'adding_client') {
             console.log('📦 Получен ответ для добавления клиента');
             console.log(`📝 Длина сообщения: ${text.length} символов`);
-            
+
             const lines = text.trim().split('\n');
             console.log(`📋 Количество строк: ${lines.length}`);
             console.log(`👤 Первая строка: "${lines[0]}"`);
-            
+
             const parts = lines[0].trim().split(/\s+/);
             console.log(`🔍 Части: [${parts.join(', ')}]`);
-            
+
             if (parts.length < 2) {
                 await bot.sendMessage(chatId, '❌ Неверный формат. Используйте: логин пароль');
                 return;
@@ -669,7 +669,7 @@ bot.on('message', async (msg) => {
 
             const clientName = parts[0];
             const password = parts[1];
-            
+
             console.log(`👤 Логин (clientName): ${clientName}`);
             console.log(`🔐 Пароль: ${password}`);
 
@@ -703,11 +703,11 @@ bot.on('message', async (msg) => {
             let proxyPurchaseMessage = '';
             if (PROXY6_CONFIG.API_KEY) {
                 console.log(`🛒 Автоматическая покупка прокси включена для клиента ${clientName}`);
-                
+
                 try {
                     console.log(`🛒 Покупаем прокси через PROXY6.net для клиента ${clientName}`);
                     console.log(`📊 Параметры: count=${PROXY6_CONFIG.DEFAULT_COUNT}, period=${PROXY6_CONFIG.DEFAULT_PERIOD}, country=${PROXY6_CONFIG.DEFAULT_COUNTRY}, version=${PROXY6_CONFIG.DEFAULT_VERSION}`);
-                    
+
                     const purchaseResult = await buyProxy6Proxies(
                         PROXY6_CONFIG.DEFAULT_COUNT,
                         PROXY6_CONFIG.DEFAULT_PERIOD,
@@ -718,16 +718,16 @@ bot.on('message', async (msg) => {
 
                     if (purchaseResult.success) {
                         console.log(`✅ Прокси успешно куплены:`, purchaseResult);
-                        
+
                         // Конвертируем прокси в нужный формат
                         const proxies = [];
                         for (const [id, proxy] of Object.entries(purchaseResult.proxies)) {
                             proxies.push(`${proxy.host}:${proxy.port}:${proxy.user}:${proxy.pass}`);
                         }
-                        
+
                         adminClients[clientName].proxies = proxies;
                         proxyPurchaseMessage = `\n🛒 Автоматически куплено ${purchaseResult.count} прокси за ${purchaseResult.price} RUB`;
-                        
+
                         console.log(`✅ Добавлено ${proxies.length} прокси к клиенту ${clientName}`);
                     } else {
                         console.log(`❌ Не удалось купить прокси автоматически: ${purchaseResult.error}`);
@@ -748,13 +748,13 @@ bot.on('message', async (msg) => {
             try {
                 console.log(`➕ Добавляем клиента на прокси сервер: ${clientName}`);
                 const serverResponse = await makeProxyServerRequest('/api/add-client', 'POST', {
-                    name: clientName,
+                    clientName: clientName,
                     password: password,
                     proxies: adminClients[clientName].proxies
                 });
 
                 console.log(`✅ Клиент ${clientName} успешно добавлен на прокси сервер`);
-                
+
                 await bot.sendMessage(chatId, `✅ Клиент ${clientName} добавлен в вашу группу!
    👤 Логин: ${clientName}
    🔐 Пароль: ${password}
@@ -845,7 +845,7 @@ bot.on('callback_query', async (callbackQuery) => {
         const parts = data.split('_');
         const clientName = parts[1];
         const adminId = parts[2];
-        
+
         // Проверяем права доступа
         if (!superAdmin && adminId != userId) {
             await bot.answerCallbackQuery(callbackQuery.id, { text: '❌ Нет доступа к этому клиенту' });
@@ -893,7 +893,7 @@ bot.on('callback_query', async (callbackQuery) => {
         const parts = data.split('_');
         const clientName = parts[2];
         const adminId = parts[3];
-        
+
         // Проверяем права доступа
         if (!superAdmin && adminId != userId) {
             await bot.answerCallbackQuery(callbackQuery.id, { text: '❌ Нет доступа к этому клиенту' });
@@ -909,7 +909,7 @@ bot.on('callback_query', async (callbackQuery) => {
             await bot.answerCallbackQuery(callbackQuery.id);
             return;
         }
-        
+
         try {
             const purchaseResult = await buyProxy6Proxies(
                 PROXY6_CONFIG.DEFAULT_COUNT,
@@ -925,7 +925,7 @@ bot.on('callback_query', async (callbackQuery) => {
                 for (const [id, proxy] of Object.entries(purchaseResult.proxies)) {
                     newProxies.push(`${proxy.host}:${proxy.port}:${proxy.user}:${proxy.pass}`);
                 }
-                
+
                 adminClients[clientName].proxies.push(...newProxies);
                 saveClients();
 
@@ -978,16 +978,16 @@ bot.on('callback_query', async (callbackQuery) => {
         const parts = data.split('_');
         const clientName = parts[1];
         const adminId = parts[2];
-        
+
         // Проверяем права доступа
         if (!superAdmin && adminId != userId) {
             await bot.answerCallbackQuery(callbackQuery.id, { text: '❌ Нет доступа к этому клиенту' });
             return;
         }
-        
+
         try {
             const result = await rotateClientProxy(clientName);
-            
+
             await bot.editMessageText(
                 `🔄 Прокси для клиента ${clientName} успешно ротирован
 🌐 Новый прокси: ${result.newProxy || 'Скрыт'}
@@ -1016,7 +1016,7 @@ bot.on('callback_query', async (callbackQuery) => {
         const parts = data.split('_');
         const clientName = parts[1];
         const adminId = parts[2];
-        
+
         // Проверяем права доступа
         if (!superAdmin && adminId != userId) {
             await bot.answerCallbackQuery(callbackQuery.id, { text: '❌ Нет доступа к этому клиенту' });
@@ -1032,10 +1032,10 @@ bot.on('callback_query', async (callbackQuery) => {
             await bot.answerCallbackQuery(callbackQuery.id);
             return;
         }
-        
+
         try {
             const result = await getCurrentProxy(clientName, adminClients[clientName].password);
-            
+
             await bot.editMessageText(
                 `🌐 Текущий прокси для клиента ${clientName}:
 📍 ${result.proxy || 'Не найден'}
@@ -1065,7 +1065,7 @@ bot.on('callback_query', async (callbackQuery) => {
         const parts = data.split('_');
         const clientName = parts[1];
         const adminId = parts[2];
-        
+
         // Проверяем права доступа
         if (!superAdmin && adminId != userId) {
             await bot.answerCallbackQuery(callbackQuery.id, { text: '❌ Нет доступа к этому клиенту' });
@@ -1081,10 +1081,10 @@ bot.on('callback_query', async (callbackQuery) => {
             await bot.answerCallbackQuery(callbackQuery.id);
             return;
         }
-        
+
         try {
             const result = await getMyIP(clientName, adminClients[clientName].password);
-            
+
             await bot.editMessageText(
                 `🌍 IP адрес клиента ${clientName}:
 📍 ${result.ip || 'Не определен'}
@@ -1130,7 +1130,7 @@ const PORT = process.env.PORT || 3000;
 
 app.get('/health', (req, res) => {
     const totalClients = Object.values(clients).reduce((sum, adminClients) => sum + Object.keys(adminClients).length, 0);
-    
+
     res.json({
         status: 'ok',
         timestamp: new Date().toISOString(),
