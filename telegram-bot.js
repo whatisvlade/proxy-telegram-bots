@@ -1,3 +1,5 @@
+// Автоматическая покупка прокси через PROXY6.net API при добавлении клиента
+
 // telegram-bot.js — Telegram Bot для управления прокси клиентами (SIMPLE FORMAT)
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
@@ -43,6 +45,15 @@ console.log(`   MANAGER_IDS: [${MANAGER_IDS.join(', ')}]`);
 const PROXY_SERVER_URL = process.env.PROXY_SERVER_URL || 'http://localhost:8080';
 const API_AUTH = Buffer.from(`${process.env.API_USERNAME || 'telegram_bot'}:${process.env.API_PASSWORD || 'bot_secret_2024'}`).toString('base64');
 
+// ====== КОНФИГУРАЦИЯ PROXY6.NET API ======
+const PROXY6_API_KEY = process.env.PROXY6_API_KEY;
+const PROXY6_BASE_URL = 'https://px6.link/api';
+const AUTO_BUY_PROXIES = process.env.AUTO_BUY_PROXIES === 'true';
+const DEFAULT_PROXY_COUNT = parseInt(process.env.DEFAULT_PROXY_COUNT) || 30;
+const DEFAULT_PROXY_PERIOD = parseInt(process.env.DEFAULT_PROXY_PERIOD) || 7;
+const DEFAULT_PROXY_COUNTRY = process.env.DEFAULT_PROXY_COUNTRY || 'ru';
+const DEFAULT_PROXY_VERSION = parseInt(process.env.DEFAULT_PROXY_VERSION) || 3; // 3 = IPv4 Shared
+
 const CONFIG_FILE = path.join(__dirname, 'clients-config.json');
 const PORT = process.env.PORT || 8080;
 
@@ -72,6 +83,159 @@ async function saveConfig() {
     console.log('💾 Конфигурация клиентов сохранена');
   } catch (error) {
     console.error('❌ Ошибка сохранения конфигурации:', error.message);
+  }
+}
+
+// ====== ФУНКЦИИ РАБОТЫ С PROXY6.NET API ======
+async function buyProxiesFromProxy6(clientName, count = DEFAULT_PROXY_COUNT, period = DEFAULT_PROXY_PERIOD, country = DEFAULT_PROXY_COUNTRY, version = DEFAULT_PROXY_VERSION) {
+  if (!PROXY6_API_KEY) {
+    console.log('⚠️ PROXY6_API_KEY не установлен, пропускаем покупку прокси');
+    return { success: false, error: 'PROXY6_API_KEY не установлен' };
+  }
+
+  try {
+    const fetch = (await import('node-fetch')).default;
+    
+    console.log(`🛒 Покупаем прокси через PROXY6.net для клиента ${clientName}`);
+    console.log(`📊 Параметры: count=${count}, period=${period}, country=${country}, version=${version}`);
+
+    // Сначала проверяем цену
+    const priceUrl = `${PROXY6_BASE_URL}/${PROXY6_API_KEY}/getprice?count=${count}&period=${period}&version=${version}`;
+    console.log(`💰 Проверяем цену: ${priceUrl}`);
+
+    const priceResponse = await fetch(priceUrl, {
+      method: 'GET',
+      timeout: 10000
+    });
+
+    if (!priceResponse.ok) {
+      throw new Error(`HTTP ${priceResponse.status}: ${priceResponse.statusText}`);
+    }
+
+    const priceData = await priceResponse.json();
+    console.log(`💰 Ответ цены:`, JSON.stringify(priceData, null, 2));
+
+    if (priceData.status !== 'yes') {
+      throw new Error(`Ошибка получения цены: ${priceData.error || 'Unknown error'}`);
+    }
+
+    console.log(`💰 Стоимость: ${priceData.price} ${priceData.currency}, баланс: ${priceData.balance}`);
+
+    // Проверяем доступность прокси для страны
+    const countUrl = `${PROXY6_BASE_URL}/${PROXY6_API_KEY}/getcount?country=${country}&version=${version}`;
+    console.log(`📊 Проверяем доступность: ${countUrl}`);
+
+    const countResponse = await fetch(countUrl, {
+      method: 'GET',
+      timeout: 10000
+    });
+
+    if (!countResponse.ok) {
+      throw new Error(`HTTP ${countResponse.status}: ${countResponse.statusText}`);
+    }
+
+    const countData = await countResponse.json();
+    console.log(`📊 Ответ доступности:`, JSON.stringify(countData, null, 2));
+
+    if (countData.status !== 'yes') {
+      throw new Error(`Ошибка проверки доступности: ${countData.error || 'Unknown error'}`);
+    }
+
+    if (countData.count < count) {
+      throw new Error(`Недостаточно прокси. Доступно: ${countData.count}, требуется: ${count}`);
+    }
+
+    console.log(`📊 Доступно прокси: ${countData.count}`);
+
+    // Покупаем прокси
+    const buyUrl = `${PROXY6_BASE_URL}/${PROXY6_API_KEY}/buy?count=${count}&period=${period}&country=${country}&version=${version}&descr=${encodeURIComponent(clientName)}`;
+    console.log(`🛒 Покупаем прокси: ${buyUrl}`);
+
+    const buyResponse = await fetch(buyUrl, {
+      method: 'GET',
+      timeout: 15000
+    });
+
+    if (!buyResponse.ok) {
+      throw new Error(`HTTP ${buyResponse.status}: ${buyResponse.statusText}`);
+    }
+
+    const buyData = await buyResponse.json();
+    console.log(`🛒 Ответ покупки:`, JSON.stringify(buyData, null, 2));
+
+    if (buyData.status !== 'yes') {
+      throw new Error(`Ошибка покупки: ${buyData.error || 'Unknown error'}`);
+    }
+
+    // Конвертируем купленные прокси в нужный формат
+    const proxies = [];
+    if (buyData.list) {
+      for (const [id, proxyData] of Object.entries(buyData.list)) {
+        const proxyUrl = `http://${proxyData.user}:${proxyData.pass}@${proxyData.host}:${proxyData.port}`;
+        proxies.push(proxyUrl);
+        console.log(`✅ Прокси добавлен: ${proxyData.host}:${proxyData.port}`);
+      }
+    }
+
+    console.log(`✅ Успешно куплено ${proxies.length} прокси для клиента ${clientName}`);
+    console.log(`💰 Потрачено: ${buyData.price} ${buyData.currency}, остаток баланса: ${buyData.balance}`);
+
+    return {
+      success: true,
+      proxies: proxies,
+      orderInfo: {
+        orderId: buyData.order_id,
+        count: buyData.count,
+        price: buyData.price,
+        currency: buyData.currency,
+        balance: buyData.balance,
+        period: buyData.period,
+        country: buyData.country
+      }
+    };
+
+  } catch (error) {
+    console.error('❌ Ошибка покупки прокси через PROXY6.net:', error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+async function checkProxy6Balance() {
+  if (!PROXY6_API_KEY) {
+    return { success: false, error: 'PROXY6_API_KEY не установлен' };
+  }
+
+  try {
+    const fetch = (await import('node-fetch')).default;
+    
+    const balanceUrl = `${PROXY6_BASE_URL}/${PROXY6_API_KEY}`;
+    console.log(`💰 Проверяем баланс PROXY6: ${balanceUrl}`);
+
+    const response = await fetch(balanceUrl, {
+      method: 'GET',
+      timeout: 10000
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    
+    if (data.status !== 'yes') {
+      throw new Error(`Ошибка API: ${data.error || 'Unknown error'}`);
+    }
+
+    return {
+      success: true,
+      balance: data.balance,
+      currency: data.currency,
+      userId: data.user_id
+    };
+
+  } catch (error) {
+    console.error('❌ Ошибка проверки баланса PROXY6:', error.message);
+    return { success: false, error: error.message };
   }
 }
 
@@ -380,6 +544,10 @@ bot.onText(/\/start/, async (msg) => {
 /health-detailed - Детальная информация о памяти, CPU, клиентах
 /api-stats - Полная статистика по всем клиентам
 
+🛒 **PROXY6.net команды:**
+/proxy6-balance - Проверить баланс PROXY6.net
+/buy-proxies - Купить прокси для существующего клиента
+
 🔧 **Админские команды:**
 ${isSuperAdmin(userId) ? '/manageadmins - Управление администраторами' : ''}
 /restart - Перезапуск бота (только супер-админ)
@@ -457,7 +625,7 @@ bot.onText(/\/addclient/, async (msg) => {
 
   console.log(`➕ Команда /addclient от userId=${userId}`);
 
-  const instructionMessage = `
+  let instructionMessage = `
 ➕ **Добавление клиента с прокси (ПРОСТОЙ ФОРМАТ)**
 
 📋 **Формат:**
@@ -471,9 +639,20 @@ client1 mypassword123
 45.91.65.201:9524:gNzocE:fnKaHc
 45.91.65.235:9071:gNzocE:fnKaHc
 \`\`\`
+`;
 
-💡 **Введите данные в указанном формате:**
-  `;
+  // Добавляем информацию об автопокупке прокси
+  if (AUTO_BUY_PROXIES && PROXY6_API_KEY) {
+    instructionMessage += `
+🛒 **Автопокупка прокси включена!**
+• Если не указать прокси, автоматически купим ${DEFAULT_PROXY_COUNT} прокси
+• Страна: ${DEFAULT_PROXY_COUNTRY.toUpperCase()}
+• Период: ${DEFAULT_PROXY_PERIOD} дней
+• Тип: IPv4 Shared
+`;
+  }
+
+  instructionMessage += `\n💡 **Введите данные в указанном формате:**`;
 
   bot.sendMessage(msg.chat.id, instructionMessage, { parse_mode: 'Markdown' });
 
@@ -513,11 +692,30 @@ client1 mypassword123
 
     let proxies = [];
     let errors = [];
+    let orderInfo = null;
 
     if (proxyLines.length > 0) {
       const parseResult = parseProxyList(proxyLines.join('\n'));
       proxies = parseResult.proxies;
       errors = parseResult.errors;
+    }
+
+    // Автоматическая покупка прокси через PROXY6.net если включена
+    if (AUTO_BUY_PROXIES && proxies.length === 0) {
+      console.log(`🛒 Автоматическая покупка прокси включена для клиента ${clientName}`);
+      
+      bot.sendMessage(msg.chat.id, `🛒 Покупаем ${DEFAULT_PROXY_COUNT} прокси через PROXY6.net...`, { parse_mode: 'Markdown' });
+      
+      const buyResult = await buyProxiesFromProxy6(clientName);
+      
+      if (buyResult.success) {
+        proxies = buyResult.proxies;
+        orderInfo = buyResult.orderInfo;
+        console.log(`✅ Автоматически куплено ${proxies.length} прокси`);
+      } else {
+        console.log(`❌ Не удалось купить прокси автоматически: ${buyResult.error}`);
+        errors.push(`Автопокупка прокси: ${buyResult.error}`);
+      }
     }
 
     // Создаем клиента с упрощенной структурой
@@ -536,6 +734,16 @@ client1 mypassword123
     resultMessage += `🔑 Логин: \`${clientName}\`\n`;
     resultMessage += `🔐 Пароль: \`${password}\`\n`;
     resultMessage += `📊 Прокси: ${proxies.length} шт.\n`;
+
+    // Добавляем информацию о покупке прокси
+    if (orderInfo) {
+      resultMessage += `\n🛒 **Информация о покупке прокси:**\n`;
+      resultMessage += `• Заказ №: ${orderInfo.orderId}\n`;
+      resultMessage += `• Потрачено: ${orderInfo.price} ${orderInfo.currency}\n`;
+      resultMessage += `• Остаток баланса: ${orderInfo.balance} ${orderInfo.currency}\n`;
+      resultMessage += `• Период: ${orderInfo.period} дней\n`;
+      resultMessage += `• Страна: ${orderInfo.country.toUpperCase()}\n`;
+    }
 
     if (errors.length > 0) {
       resultMessage += `\n⚠️ **Ошибки в прокси:**\n`;
@@ -1065,6 +1273,133 @@ bot.onText(/\/health-detailed/, async (msg) => {
 });
 
 // ✅ КОМАНДА: Полная статистика по всем клиентам
+// ✅ КОМАНДА: Проверка баланса PROXY6.net
+bot.onText(/\/proxy6-balance/, async (msg) => {
+  const userId = msg.from.id;
+  if (!isAuthorized(userId)) {
+    return bot.sendMessage(msg.chat.id, `❌ Нет доступа. Ваш ID: ${userId}. Используйте /debug для диагностики.`);
+  }
+
+  console.log(`💰 Команда /proxy6-balance от userId=${userId}`);
+
+  if (!PROXY6_API_KEY) {
+    return bot.sendMessage(msg.chat.id, '❌ PROXY6_API_KEY не установлен. Установите переменную окружения для работы с PROXY6.net', { parse_mode: 'Markdown' });
+  }
+
+  bot.sendMessage(msg.chat.id, '💰 Проверяем баланс PROXY6.net...', { parse_mode: 'Markdown' });
+
+  const balanceResult = await checkProxy6Balance();
+
+  if (balanceResult.success) {
+    let message = `💰 **Баланс PROXY6.net**\n\n`;
+    message += `• Баланс: **${balanceResult.balance} ${balanceResult.currency}**\n`;
+    message += `• ID аккаунта: \`${balanceResult.userId}\`\n\n`;
+    
+    if (AUTO_BUY_PROXIES) {
+      message += `🛒 **Настройки автопокупки:**\n`;
+      message += `• Автопокупка: ✅ Включена\n`;
+      message += `• Количество: ${DEFAULT_PROXY_COUNT} прокси\n`;
+      message += `• Период: ${DEFAULT_PROXY_PERIOD} дней\n`;
+      message += `• Страна: ${DEFAULT_PROXY_COUNTRY.toUpperCase()}\n`;
+      message += `• Тип: IPv4 Shared\n`;
+    } else {
+      message += `🛒 **Автопокупка:** ❌ Отключена\n`;
+      message += `💡 Установите \`AUTO_BUY_PROXIES=true\` для включения`;
+    }
+
+    bot.sendMessage(msg.chat.id, message, { parse_mode: 'Markdown' });
+  } else {
+    bot.sendMessage(msg.chat.id, `❌ Ошибка проверки баланса PROXY6.net:\n\n\`${balanceResult.error}\``, { parse_mode: 'Markdown' });
+  }
+});
+
+// ✅ КОМАНДА: Покупка прокси для существующего клиента
+bot.onText(/\/buy-proxies/, async (msg) => {
+  const userId = msg.from.id;
+  if (!isAuthorized(userId)) {
+    return bot.sendMessage(msg.chat.id, `❌ Нет доступа. Ваш ID: ${userId}. Используйте /debug для диагностики.`);
+  }
+
+  console.log(`🛒 Команда /buy-proxies от userId=${userId}`);
+
+  if (!PROXY6_API_KEY) {
+    return bot.sendMessage(msg.chat.id, '❌ PROXY6_API_KEY не установлен. Установите переменную окружения для работы с PROXY6.net', { parse_mode: 'Markdown' });
+  }
+
+  if (Object.keys(clientsConfig).length === 0) {
+    return bot.sendMessage(msg.chat.id, '❌ Нет клиентов. Сначала добавьте клиента командой /addclient');
+  }
+
+  // Показываем список клиентов
+  let clientsList = '🛒 **Покупка прокси для клиента**\n\n👥 **Выберите клиента:**\n\n';
+  const clientNames = Object.keys(clientsConfig);
+
+  for (const [index, clientName] of clientNames.entries()) {
+    const config = clientsConfig[clientName];
+    clientsList += `${index + 1}. **${clientName}** (${config.proxies.length} прокси)\n`;
+  }
+
+  clientsList += `\n💡 **Введите номер клиента или имя:**`;
+
+  bot.sendMessage(msg.chat.id, clientsList, { parse_mode: 'Markdown' });
+
+  bot.once('message', async (clientResponse) => {
+    if (clientResponse.from.id !== userId) return;
+
+    const clientInput = clientResponse.text.trim();
+    let selectedClient = null;
+
+    // Проверяем, это номер или имя
+    if (/^\d+$/.test(clientInput)) {
+      const clientIndex = parseInt(clientInput) - 1;
+      if (clientIndex >= 0 && clientIndex < clientNames.length) {
+        selectedClient = clientNames[clientIndex];
+      }
+    } else {
+      if (clientsConfig[clientInput]) {
+        selectedClient = clientInput;
+      }
+    }
+
+    if (!selectedClient) {
+      return bot.sendMessage(msg.chat.id, '❌ Клиент не найден. Используйте /buy-proxies для повторной попытки.');
+    }
+
+    console.log(`🛒 Выбран клиент для покупки прокси: ${selectedClient}`);
+
+    bot.sendMessage(msg.chat.id, `🛒 Покупаем ${DEFAULT_PROXY_COUNT} прокси для клиента **${selectedClient}**...`, { parse_mode: 'Markdown' });
+
+    const buyResult = await buyProxiesFromProxy6(selectedClient);
+
+    if (buyResult.success) {
+      // Добавляем купленные прокси к клиенту
+      clientsConfig[selectedClient].proxies.push(...buyResult.proxies);
+      await saveConfig();
+
+      // Добавляем прокси на прокси сервер
+      const addResult = await addProxyToClient(selectedClient, buyResult.proxies);
+
+      let resultMessage = `✅ Куплено **${buyResult.proxies.length}** прокси для клиента **${selectedClient}**!\n\n`;
+      resultMessage += `📊 Всего прокси у клиента: ${clientsConfig[selectedClient].proxies.length} шт.\n\n`;
+      
+      resultMessage += `🛒 **Информация о покупке:**\n`;
+      resultMessage += `• Заказ №: ${buyResult.orderInfo.orderId}\n`;
+      resultMessage += `• Потрачено: ${buyResult.orderInfo.price} ${buyResult.orderInfo.currency}\n`;
+      resultMessage += `• Остаток баланса: ${buyResult.orderInfo.balance} ${buyResult.orderInfo.currency}\n`;
+      resultMessage += `• Период: ${buyResult.orderInfo.period} дней\n`;
+      resultMessage += `• Страна: ${buyResult.orderInfo.country.toUpperCase()}\n`;
+
+      if (!addResult.success) {
+        resultMessage += `\n⚠️ Прокси куплены и добавлены локально, но не удалось обновить прокси сервер.\nОшибка: ${addResult.error || 'Unknown error'}`;
+      }
+
+      bot.sendMessage(msg.chat.id, resultMessage, { parse_mode: 'Markdown' });
+    } else {
+      bot.sendMessage(msg.chat.id, `❌ Ошибка покупки прокси:\n\n\`${buyResult.error}\``, { parse_mode: 'Markdown' });
+    }
+  });
+});
+
 bot.onText(/\/api-stats/, async (msg) => {
   const userId = msg.from.id;
   if (!isAuthorized(userId)) {
@@ -1170,7 +1505,7 @@ bot.onText(/^➕ Добавить клиента$/, async (msg) => {
 
   console.log(`➕ Кнопка "Добавить клиента" от userId=${userId}`);
 
-  const instructionMessage = `
+  let instructionMessage = `
 ➕ **Добавление клиента с прокси (ПРОСТОЙ ФОРМАТ)**
 
 📋 **Формат:**
@@ -1184,9 +1519,20 @@ client1 mypassword123
 45.91.65.201:9524:gNzocE:fnKaHc
 45.91.65.235:9071:gNzocE:fnKaHc
 \`\`\`
+`;
 
-💡 **Введите данные в указанном формате:**
-  `;
+  // Добавляем информацию об автопокупке прокси
+  if (AUTO_BUY_PROXIES && PROXY6_API_KEY) {
+    instructionMessage += `
+🛒 **Автопокупка прокси включена!**
+• Если не указать прокси, автоматически купим ${DEFAULT_PROXY_COUNT} прокси
+• Страна: ${DEFAULT_PROXY_COUNTRY.toUpperCase()}
+• Период: ${DEFAULT_PROXY_PERIOD} дней
+• Тип: IPv4 Shared
+`;
+  }
+
+  instructionMessage += `\n💡 **Введите данные в указанном формате:**`;
 
   bot.sendMessage(msg.chat.id, instructionMessage, { parse_mode: 'Markdown' });
 
@@ -1226,11 +1572,30 @@ client1 mypassword123
 
     let proxies = [];
     let errors = [];
+    let orderInfo = null;
 
     if (proxyLines.length > 0) {
       const parseResult = parseProxyList(proxyLines.join('\n'));
       proxies = parseResult.proxies;
       errors = parseResult.errors;
+    }
+
+    // Автоматическая покупка прокси через PROXY6.net если включена
+    if (AUTO_BUY_PROXIES && proxies.length === 0) {
+      console.log(`🛒 Автоматическая покупка прокси включена для клиента ${clientName}`);
+      
+      bot.sendMessage(msg.chat.id, `🛒 Покупаем ${DEFAULT_PROXY_COUNT} прокси через PROXY6.net...`, { parse_mode: 'Markdown' });
+      
+      const buyResult = await buyProxiesFromProxy6(clientName);
+      
+      if (buyResult.success) {
+        proxies = buyResult.proxies;
+        orderInfo = buyResult.orderInfo;
+        console.log(`✅ Автоматически куплено ${proxies.length} прокси`);
+      } else {
+        console.log(`❌ Не удалось купить прокси автоматически: ${buyResult.error}`);
+        errors.push(`Автопокупка прокси: ${buyResult.error}`);
+      }
     }
 
     // Создаем клиента с упрощенной структурой
@@ -1249,6 +1614,16 @@ client1 mypassword123
     resultMessage += `🔑 Логин: \`${clientName}\`\n`;
     resultMessage += `🔐 Пароль: \`${password}\`\n`;
     resultMessage += `📊 Прокси: ${proxies.length} шт.\n`;
+
+    // Добавляем информацию о покупке прокси
+    if (orderInfo) {
+      resultMessage += `\n🛒 **Информация о покупке прокси:**\n`;
+      resultMessage += `• Заказ №: ${orderInfo.orderId}\n`;
+      resultMessage += `• Потрачено: ${orderInfo.price} ${orderInfo.currency}\n`;
+      resultMessage += `• Остаток баланса: ${orderInfo.balance} ${orderInfo.currency}\n`;
+      resultMessage += `• Период: ${orderInfo.period} дней\n`;
+      resultMessage += `• Страна: ${orderInfo.country.toUpperCase()}\n`;
+    }
 
     if (errors.length > 0) {
       resultMessage += `\n⚠️ **Ошибки в прокси:**\n`;
@@ -1406,7 +1781,7 @@ bot.onText(/^🗑️ Удалить клиента$/, async (msg) => {
 // ====== HTTP СЕРВЕР ======
 app.get('/', (req, res) => {
   res.send(`
-    <h1>🤖 Telegram Proxy Manager Bot (SIMPLE FORMAT)</h1>
+    <h1>🤖 Telegram Proxy Manager Bot (SIMPLE FORMAT + PROXY6.net)</h1>
     <p>Bot is running with simple format: login + password + proxies!</p>
     <p>ADMIN_IDS env: "${process.env.ADMIN_IDS || 'NOT SET'}"</p>
     <p>SUPER_ADMIN env: "${process.env.SUPER_ADMIN || 'NOT SET'}"</p>
@@ -1417,6 +1792,14 @@ app.get('/', (req, res) => {
     <p>Total clients: ${Object.keys(clientsConfig).length}</p>
     <p>Total proxies: ${Object.values(clientsConfig).reduce((sum, config) => sum + config.proxies.length, 0)}</p>
     <p>Proxy Server URL: ${PROXY_SERVER_URL}</p>
+    <hr>
+    <h2>🛒 PROXY6.net Integration</h2>
+    <p>PROXY6_API_KEY: ${PROXY6_API_KEY ? 'SET' : 'NOT SET'}</p>
+    <p>Auto Buy Proxies: ${AUTO_BUY_PROXIES ? 'ENABLED' : 'DISABLED'}</p>
+    <p>Default Proxy Count: ${DEFAULT_PROXY_COUNT}</p>
+    <p>Default Proxy Period: ${DEFAULT_PROXY_PERIOD} days</p>
+    <p>Default Proxy Country: ${DEFAULT_PROXY_COUNTRY.toUpperCase()}</p>
+    <p>Default Proxy Version: ${DEFAULT_PROXY_VERSION} (IPv4 Shared)</p>
   `);
 });
 
@@ -1429,10 +1812,20 @@ app.get('/health', (req, res) => {
     superAdmin: SUPER_ADMIN_ID,
     managers: MANAGER_IDS,
     proxyServerUrl: PROXY_SERVER_URL,
+    proxy6Integration: {
+      apiKeySet: !!PROXY6_API_KEY,
+      autoBuyEnabled: AUTO_BUY_PROXIES,
+      defaultCount: DEFAULT_PROXY_COUNT,
+      defaultPeriod: DEFAULT_PROXY_PERIOD,
+      defaultCountry: DEFAULT_PROXY_COUNTRY,
+      defaultVersion: DEFAULT_PROXY_VERSION
+    },
     envVars: {
       ADMIN_IDS: process.env.ADMIN_IDS || 'NOT SET',
       SUPER_ADMIN: process.env.SUPER_ADMIN || 'NOT SET',
-      MANAGER_IDS: process.env.MANAGER_IDS || 'NOT SET'
+      MANAGER_IDS: process.env.MANAGER_IDS || 'NOT SET',
+      PROXY6_API_KEY: PROXY6_API_KEY ? 'SET' : 'NOT SET',
+      AUTO_BUY_PROXIES: process.env.AUTO_BUY_PROXIES || 'NOT SET'
     }
   });
 });
