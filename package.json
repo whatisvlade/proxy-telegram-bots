@@ -1,11 +1,11 @@
 {
-  "name": "telegram-proxy-bots",
+  "name": "telegram-proxy-bot",
   "version": "1.0.0",
   "description": "Telegram bot for proxy management with multi-admin support",
   "main": "telegram-bots.js",
   "scripts": {
-    "start": "node telegram-bots.js",
-    "dev": "nodemon telegram-bots.js"
+    "start": "node telegram-bot.js",
+    "dev": "nodemon telegram-bot.js"
   },
   "dependencies": {
     "node-telegram-bot-api": "^0.66.0",
