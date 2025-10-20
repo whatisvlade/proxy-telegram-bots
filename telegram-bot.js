@@ -12,7 +12,7 @@ const PROXY_SERVER_URL = process.env.PROXY_SERVER_URL || 'https://railway-proxy-
 const PROXY6_CONFIG = {
     API_KEY: process.env.PROXY6_API_KEY,
     BASE_URL: 'https://px6.link/api',
-    DEFAULT_COUNT: 25,
+    DEFAULT_COUNT: 3,
     DEFAULT_PERIOD: 7,
     DEFAULT_COUNTRY: 'ru',
     DEFAULT_VERSION: 3 // IPv4 Shared
