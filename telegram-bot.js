@@ -123,7 +123,7 @@ async function checkProxy6Balance() {
     }
 }
 
-async function getProxy6Price(count = 30, period = 7, version = 4) {
+async function getProxy6Price(count = 30, period = 7, version = 3) {
     try {
         const response = await axios.get(`${PROXY6_BASE_URL}/${PROXY6_API_KEY}/getprice`, {
             params: {
