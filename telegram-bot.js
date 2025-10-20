@@ -1,79 +1,1375 @@
-// telegram-bot-fixed-admin.js - Telegram Bot с исправленным управлением админами через + и -
 const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
-const fs = require('fs').promises;
+const fs = require('fs');
 const path = require('path');
 
 // Конфигурация
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const SUPER_ADMIN_ID = parseInt(process.env.SUPER_ADMIN_ID);
-const RAILWAY_PROXY_URL = process.env.RAILWAY_PROXY_URL || 'https://railway-proxy-server-production-58a1.up.railway.app';
+const PROXY_SERVER_URL = process.env.PROXY_SERVER_URL || 'https://railway-proxy-server-production-58a1.up.railway.app';
 
-// PROXY6.net API конфигурация
-const PROXY6_API_KEY = process.env.PROXY6_API_KEY;
-const PROXY6_BASE_URL = 'https://proxy6.net/api';
+// PROXY6.net конфигурация
+const PROXY6_CONFIG = {
+    API_KEY: process.env.PROXY6_API_KEY,
+    BASE_URL: 'https://px6.link/api',
+    DEFAULT_COUNT: 1,
+    DEFAULT_PERIOD: 7,
+    DEFAULT_COUNTRY: 'ru',
+    DEFAULT_VERSION: 3 // IPv4 Shared
+};
 
-// Файлы для хранения данных
-const ADMINS_FILE = path.join(__dirname, 'admins.json');
-const USER_STATES_FILE = path.join(__dirname, 'user_states.json');
-
-// Инициализация бота
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
-// Состояния пользователей и админы
-let admins = {};
-let userStates = {};
+// Файлы конфигурации
+const CLIENTS_FILE = path.join(__dirname, 'clients.json');
+const ADMINS_FILE = path.join(__dirname, 'admins.json');
 
-// Функции для работы с файлами
-async function loadAdmins() {
+// Загрузка конфигураций
+let clients = {}; // Структура: { adminId: { clientName: { password, proxies } } }
+let admins = [];
+
+// Клавиатура для всех админов
+const adminKeyboard = {
+    reply_markup: {
+        keyboard: [
+            [
+                { text: '👤 Добавить клиента' },
+                { text: '🗑️ Удалить клиента' }
+            ],
+            [
+                { text: '➕ Добавить прокси' },
+                { text: '➖ Удалить прокси' }
+            ],
+            [
+                { text: '📋 Мои клиенты' },
+                { text: '🔄 Ротация прокси' }
+            ],
+            [
+                { text: '💰 Баланс PROXY6' },
+                { text: '🛒 Купить прокси' }
+            ],
+            [
+                { text: '🌐 Текущий прокси' },
+                { text: '🌍 Мой IP' }
+            ]
+        ],
+        resize_keyboard: true,
+        persistent: true
+    }
+};
+
+// Клавиатура для супер-админа (с дополнительными кнопками)
+const superAdminKeyboard = {
+    reply_markup: {
+        keyboard: [
+            [
+                { text: '👤 Добавить клиента' },
+                { text: '🗑️ Удалить клиента' }
+            ],
+            [
+                { text: '➕ Добавить прокси' },
+                { text: '➖ Удалить прокси' }
+            ],
+            [
+                { text: '📋 Все клиенты' },
+                { text: '🔄 Ротация прокси' }
+            ],
+            [
+                { text: '💰 Баланс PROXY6' },
+                { text: '🛒 Купить прокси' }
+            ],
+            [
+                { text: '🌐 Текущий прокси' },
+                { text: '🌍 Мой IP' }
+            ],
+            [
+                { text: '👥 Управление админами' },
+                { text: '🔄 Перезапуск' }
+            ]
+        ],
+        resize_keyboard: true,
+        persistent: true
+    }
+};
+
+function loadClients() {
     try {
-        const data = await fs.readFile(ADMINS_FILE, 'utf8');
-        admins = JSON.parse(data);
-        console.log('✅ Админы загружены из файла');
+        if (fs.existsSync(CLIENTS_FILE)) {
+            const data = fs.readFileSync(CLIENTS_FILE, 'utf8');
+            clients = JSON.parse(data);
+        }
     } catch (error) {
-        console.log('📝 Создаем новый файл админов');
-        admins = {};
-        await saveAdmins();
+        console.error('❌ Ошибка загрузки клиентов:', error);
+        clients = {};
     }
 }
 
-async function saveAdmins() {
+function saveClients() {
     try {
-        await fs.writeFile(ADMINS_FILE, JSON.stringify(admins, null, 2));
-        console.log('💾 Админы сохранены в файл');
+        fs.writeFileSync(CLIENTS_FILE, JSON.stringify(clients, null, 2));
+        console.log('💾 Конфигурация клиентов сохранена');
     } catch (error) {
-        console.error('❌ Ошибка сохранения админов:', error.message);
+        console.error('❌ Ошибка сохранения клиентов:', error);
     }
 }
 
-async function loadUserStates() {
+function loadAdmins() {
     try {
-        const data = await fs.readFile(USER_STATES_FILE, 'utf8');
-        userStates = JSON.parse(data);
-        console.log('✅ Состояния пользователей загружены');
+        if (fs.existsSync(ADMINS_FILE)) {
+            const data = fs.readFileSync(ADMINS_FILE, 'utf8');
+            admins = JSON.parse(data);
+        }
     } catch (error) {
-        console.log('📝 Создаем новый файл состояний');
-        userStates = {};
-        await saveUserStates();
+        console.error('❌ Ошибка загрузки админов:', error);
+        admins = [];
     }
 }
 
-async function saveUserStates() {
+function saveAdmins() {
     try {
-        await fs.writeFile(USER_STATES_FILE, JSON.stringify(userStates, null, 2));
+        fs.writeFileSync(ADMINS_FILE, JSON.stringify(admins, null, 2));
+        console.log('💾 Конфигурация админов сохранена');
     } catch (error) {
-        console.error('❌ Ошибка сохранения состояний:', error.message);
+        console.error('❌ Ошибка сохранения админов:', error);
     }
 }
 
-// Проверка прав доступа
+// Функции для работы с клиентами по админам
+function getAdminClients(adminId) {
+    if (!clients[adminId]) {
+        clients[adminId] = {};
+    }
+    return clients[adminId];
+}
+
+function getAllClients() {
+    const allClients = {};
+    for (const [adminId, adminClients] of Object.entries(clients)) {
+        for (const [clientName, clientData] of Object.entries(adminClients)) {
+            allClients[`${clientName}_${adminId}`] = {
+                ...clientData,
+                adminId: adminId,
+                originalName: clientName
+            };
+        }
+    }
+    return allClients;
+}
+
+function findClientByName(clientName, adminId = null) {
+    if (adminId) {
+        // Ищем у конкретного админа
+        const adminClients = getAdminClients(adminId);
+        if (adminClients[clientName]) {
+            return {
+                client: adminClients[clientName],
+                adminId: adminId,
+                clientName: clientName
+            };
+        }
+    } else {
+        // Ищем у всех админов (для супер-админа)
+        for (const [aId, adminClients] of Object.entries(clients)) {
+            if (adminClients[clientName]) {
+                return {
+                    client: adminClients[clientName],
+                    adminId: aId,
+                    clientName: clientName
+                };
+            }
+        }
+    }
+    return null;
+}
+
+// PROXY6.net API функции
+async function proxy6Request(method, params = {}) {
+    try {
+        if (!PROXY6_CONFIG.API_KEY) {
+            throw new Error('API ключ PROXY6.net не настроен');
+        }
+
+        const queryParams = new URLSearchParams(params).toString();
+        const url = `${PROXY6_CONFIG.BASE_URL}/${PROXY6_CONFIG.API_KEY}/${method}${queryParams ? '?' + queryParams : ''}`;
+
+        const response = await axios.get(url, {
+            timeout: 10000,
+            headers: {
+                'User-Agent': 'TelegramBot/1.0'
+            }
+        });
+
+        return response.data;
+    } catch (error) {
+        console.error('❌ Ошибка PROXY6 запроса:', error.message);
+        throw error;
+    }
+}
+
+async function checkProxy6Balance() {
+    try {
+        const response = await proxy6Request('');
+        if (response.status === 'yes') {
+            return {
+                success: true,
+                balance: response.balance,
+                currency: response.currency,
+                user_id: response.user_id
+            };
+        } else {
+            return {
+                success: false,
+                error: response.error || 'Неизвестная ошибка'
+            };
+        }
+    } catch (error) {
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+}
+
+async function buyProxy6Proxies(count, period, country = 'ru', version = 3, descr = '') {
+    try {
+        const response = await proxy6Request('buy', {
+            count: count,
+            period: period,
+            country: country,
+            version: version,
+            descr: descr
+        });
+
+        if (response.status === 'yes') {
+            return {
+                success: true,
+                order_id: response.order_id,
+                count: response.count,
+                price: response.price,
+                proxies: response.list
+            };
+        } else {
+            return {
+                success: false,
+                error: response.error || 'Ошибка покупки прокси'
+            };
+        }
+    } catch (error) {
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+}
+
+// Функции работы с прокси сервером
+async function makeProxyServerRequest(endpoint, method = 'GET', data = null, auth = null) {
+    try {
+        const config = {
+            method: method,
+            url: `${PROXY_SERVER_URL}${endpoint}`,
+            timeout: 10000,
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        };
+
+        if (auth) {
+            config.auth = auth;
+        }
+
+        if (data && method !== 'GET') {
+            config.data = data;
+        }
+
+        console.log(`🌐 Запрос к прокси серверу: ${method} ${config.url}`);
+        if (data) console.log('📤 Данные:', data);
+
+        const response = await axios(config);
+        console.log('✅ Успешный ответ сервера');
+        return response.data;
+    } catch (error) {
+        console.error('❌ Ошибка запроса к прокси серверу:', error.message);
+        if (error.response) {
+            console.error('📥 Ответ с ошибкой:', error.response.data);
+        }
+        throw error;
+    }
+}
+
+// Исправленная функция удаления клиента
+async function deleteClientFromServer(clientName) {
+    try {
+        console.log(`🌐 Запрос к прокси серверу: DELETE ${PROXY_SERVER_URL}/api/delete-client/${clientName}`);
+
+        const response = await axios.delete(`${PROXY_SERVER_URL}/api/delete-client/${clientName}`, {
+            timeout: 10000,
+            headers: {
+                'Accept': 'application/json'
+            }
+        });
+
+        console.log('✅ Клиент успешно удален с сервера');
+        return { success: true, data: response.data };
+    } catch (error) {
+        console.error('❌ Ошибка удаления клиента с сервера:', error.message);
+        if (error.response) {
+            console.log('📥 Ответ с ошибкой:', error.response.data);
+        }
+        return { success: false, error: error.message };
+    }
+}
+
+async function rotateClientProxy(clientName) {
+    try {
+        const response = await makeProxyServerRequest('/api/rotate-client', 'POST', {
+            name: clientName
+        });
+        return response;
+    } catch (error) {
+        throw new Error(`Ошибка ротации прокси: ${error.message}`);
+    }
+}
+
+async function getCurrentProxy(clientName, password) {
+    try {
+        const auth = {
+            username: clientName,
+            password: password
+        };
+
+        const response = await makeProxyServerRequest(`/current`, 'GET', null, auth);
+        return response;
+    } catch (error) {
+        throw new Error(`Ошибка получения текущего прокси: ${error.message}`);
+    }
+}
+
+async function getMyIP(clientName, password) {
+    try {
+        const auth = {
+            username: clientName,
+            password: password
+        };
+
+        const response = await makeProxyServerRequest(`/myip`, 'GET', null, auth);
+        return response;
+    } catch (error) {
+        throw new Error(`Ошибка получения IP: ${error.message}`);
+    }
+}
+
+// Проверка авторизации
+function isAuthorized(userId) {
+    return userId === SUPER_ADMIN_ID || admins.includes(userId);
+}
+
 function isSuperAdmin(userId) {
     return userId === SUPER_ADMIN_ID;
 }
 
-function isAdmin(userId) {
-    return isSuperAdmin(userId) || admins.hasOwnProperty(userId.toString());
+// Функция для отправки клавиатуры
+function getKeyboardForUser(userId) {
+    return isSuperAdmin(userId) ? superAdminKeyboard : adminKeyboard;
 }
+
+// Состояния пользователей
+const userStates = {};
+
+// Обработка сообщений
+bot.on('message', async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const text = msg.text;
+    const username = msg.from.username || 'Unknown';
+
+    // Проверка авторизации
+    if (!isAuthorized(userId)) {
+        await bot.sendMessage(chatId, '❌ У вас нет доступа к этому боту');
+        return;
+    }
+
+    // Проверка супер-админа
+    const superAdmin = isSuperAdmin(userId);
+
+    // Обработка команд и кнопок
+    if (text === '/start') {
+        const welcomeMessage = `🚀 Добро пожаловать в Proxy Manager Bot!
+
+👤 Ваша роль: ${superAdmin ? 'Супер-админ (видите всех клиентов)' : 'Админ (видите только своих клиентов)'}
+
+🎯 Используйте кнопки ниже для управления клиентами и прокси!
+
+ℹ️ Автоматическая покупка прокси: При добавлении нового клиента автоматически покупается ${PROXY6_CONFIG.DEFAULT_COUNT} российских прокси на ${PROXY6_CONFIG.DEFAULT_PERIOD} дней через PROXY6.net`;
+
+        await bot.sendMessage(chatId, welcomeMessage, getKeyboardForUser(userId));
+        return;
+    }
+
+    // Обработка кнопок клавиатуры
+    if (text === '👤 Добавить клиента' || text === '/addclient') {
+        console.log(`➕ Команда добавления клиента от userId=${userId}`);
+        userStates[userId] = { action: 'adding_client' };
+        await bot.sendMessage(chatId, `➕ Добавление клиента
+
+📝 Отправьте данные в формате:
+\`логин пароль\`
+
+Например: \`user123 pass456\`
+
+ℹ️ Автоматически будет куплено ${PROXY6_CONFIG.DEFAULT_COUNT} российских прокси на ${PROXY6_CONFIG.DEFAULT_PERIOD} дней
+👤 Клиент будет добавлен в вашу группу`, { parse_mode: 'Markdown' });
+        return;
+    }
+
+    if (text === '🗑️ Удалить клиента' || text === '/deleteclient') {
+        console.log(`🗑️ Команда удаления клиента от userId=${userId}`);
+
+        const adminClients = superAdmin ? getAllClients() : getAdminClients(userId);
+        const clientNames = Object.keys(adminClients);
+
+        if (clientNames.length === 0) {
+            await bot.sendMessage(chatId, '❌ Нет доступных клиентов для удаления');
+            return;
+        }
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: clientNames.map(name => {
+                    const client = adminClients[name];
+                    const displayName = superAdmin && client.originalName ?
+                        `${client.originalName} (Admin: ${client.adminId})` : name;
+
+                    return [{
+                        text: `🗑️ ${displayName}`,
+                        callback_data: `delete_${name}_${superAdmin ? client.adminId || userId : userId}`
+                    }];
+                })
+            }
+        };
+
+        await bot.sendMessage(chatId, '🗑️ Выберите клиента для удаления:', keyboard);
+        return;
+    }
+
+    if (text === '📋 Мои клиенты' || text === '📋 Все клиенты' || text === '/clients') {
+        console.log(`📋 Команда /clients от userId=${userId}`);
+
+        const adminClients = superAdmin ? getAllClients() : getAdminClients(userId);
+        const clientNames = Object.keys(adminClients);
+
+        if (clientNames.length === 0) {
+            await bot.sendMessage(chatId, '📋 Список клиентов пуст');
+            return;
+        }
+
+        let message = `📋 Список ${superAdmin ? 'всех' : 'ваших'} клиентов:\n\n`;
+        for (const [name, client] of Object.entries(adminClients)) {
+            const displayName = superAdmin && client.originalName ?
+                `${client.originalName} (Admin: ${client.adminId})` : name;
+            const proxyCount = client.proxies ? client.proxies.length : 0;
+
+            message += `👤 ${displayName}\n`;
+            message += `   🔐 Пароль: ${client.password}\n`;
+            message += `   🌐 Прокси: ${proxyCount} шт.\n\n`;
+        }
+
+        await bot.sendMessage(chatId, message);
+        return;
+    }
+
+    if (text === '💰 Баланс PROXY6' || text === '/proxy6-balance') {
+        console.log(`💰 Команда /proxy6-balance от userId=${userId}`);
+
+        if (!PROXY6_CONFIG.API_KEY) {
+            await bot.sendMessage(chatId, '❌ API ключ PROXY6.net не настроен');
+            return;
+        }
+
+        const balanceResult = await checkProxy6Balance();
+
+        if (balanceResult.success) {
+            const message = `💰 Баланс PROXY6.net:
+💵 ${balanceResult.balance} ${balanceResult.currency}
+👤 ID аккаунта: ${balanceResult.user_id}`;
+            await bot.sendMessage(chatId, message);
+        } else {
+            await bot.sendMessage(chatId, `❌ Ошибка получения баланса: ${balanceResult.error}`);
+        }
+        return;
+    }
+
+    if (text === '🛒 Купить прокси' || text === '/buy-proxies') {
+        console.log(`🛒 Команда /buy-proxies от userId=${userId}`);
+
+        if (!PROXY6_CONFIG.API_KEY) {
+            await bot.sendMessage(chatId, '❌ API ключ PROXY6.net не настроен');
+            return;
+        }
+
+        const adminClients = superAdmin ? getAllClients() : getAdminClients(userId);
+        const clientNames = Object.keys(adminClients);
+
+        if (clientNames.length === 0) {
+            await bot.sendMessage(chatId, '❌ Нет доступных клиентов');
+            return;
+        }
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: clientNames.map(name => {
+                    const client = adminClients[name];
+                    const displayName = superAdmin && client.originalName ?
+                        `${client.originalName} (Admin: ${client.adminId})` : name;
+                    const proxyCount = client.proxies ? client.proxies.length : 0;
+
+                    return [{
+                        text: `${displayName} (${proxyCount} прокси)`,
+                        callback_data: `buy_proxy_${name}_${superAdmin ? client.adminId || userId : userId}`
+                    }];
+                })
+            }
+        };
+
+        await bot.sendMessage(chatId, '🛒 Выберите клиента для покупки прокси:', keyboard);
+        return;
+    }
+
+    if (text === '➕ Добавить прокси' || text === '/add-proxy') {
+        console.log(`➕ Команда добавления прокси от userId=${userId}`);
+
+        const adminClients = superAdmin ? getAllClients() : getAdminClients(userId);
+        const clientNames = Object.keys(adminClients);
+
+        if (clientNames.length === 0) {
+            await bot.sendMessage(chatId, '❌ Нет доступных клиентов');
+            return;
+        }
+
+        userStates[userId] = { action: 'adding_proxy' };
+        
+        let message = `➕ Добавление прокси
+
+📝 Отправьте данные в формате:
+\`имя_клиента\`
+\`host:port:user:pass\`
+
+Или несколько прокси:
+\`имя_клиента\`
+\`host1:port1:user1:pass1\`
+\`host2:port2:user2:pass2\`
+
+📋 Доступные клиенты:\n`;
+
+        for (const [name, client] of Object.entries(adminClients)) {
+            const displayName = superAdmin && client.originalName ?
+                `${client.originalName} (Admin: ${client.adminId})` : name;
+            const proxyCount = client.proxies ? client.proxies.length : 0;
+            message += `• ${displayName} (${proxyCount} прокси)\n`;
+        }
+
+        await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+        return;
+    }
+
+    if (text === '➖ Удалить прокси' || text === '/remove-proxy') {
+        console.log(`➖ Команда удаления прокси от userId=${userId}`);
+
+        const adminClients = superAdmin ? getAllClients() : getAdminClients(userId);
+        const clientNames = Object.keys(adminClients);
+
+        if (clientNames.length === 0) {
+            await bot.sendMessage(chatId, '❌ Нет доступных клиентов');
+            return;
+        }
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: clientNames.map(name => {
+                    const client = adminClients[name];
+                    const displayName = superAdmin && client.originalName ?
+                        `${client.originalName} (Admin: ${client.adminId})` : name;
+                    const proxyCount = client.proxies ? client.proxies.length : 0;
+
+                    return [{
+                        text: `➖ ${displayName} (${proxyCount} прокси)`,
+                        callback_data: `remove_proxy_${name}_${superAdmin ? client.adminId || userId : userId}`
+                    }];
+                })
+            }
+        };
+
+        await bot.sendMessage(chatId, '➖ Выберите клиента для удаления прокси:', keyboard);
+        return;
+    }
+
+    if (text === '🔄 Ротация прокси' || text === '/rotate') {
+        console.log(`🔄 Команда /rotate от userId=${userId}`);
+
+        const adminClients = superAdmin ? getAllClients() : getAdminClients(userId);
+        const clientNames = Object.keys(adminClients);
+
+        if (clientNames.length === 0) {
+            await bot.sendMessage(chatId, '❌ Нет доступных клиентов');
+            return;
+        }
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: clientNames.map(name => {
+                    const client = adminClients[name];
+                    const displayName = superAdmin && client.originalName ?
+                        `${client.originalName} (Admin: ${client.adminId})` : name;
+
+                    return [{
+                        text: `🔄 ${displayName}`,
+                        callback_data: `rotate_${name}_${superAdmin ? client.adminId || userId : userId}`
+                    }];
+                })
+            }
+        };
+
+        await bot.sendMessage(chatId, '🔄 Выберите клиента для ротации прокси:', keyboard);
+        return;
+    }
+
+    if (text === '🌐 Текущий прокси' || text === '/current-proxy') {
+        console.log(`🌐 Команда /current-proxy от userId=${userId}`);
+
+        const adminClients = superAdmin ? getAllClients() : getAdminClients(userId);
+        const clientNames = Object.keys(adminClients);
+
+        if (clientNames.length === 0) {
+            await bot.sendMessage(chatId, '❌ Нет доступных клиентов');
+            return;
+        }
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: clientNames.map(name => {
+                    const client = adminClients[name];
+                    const displayName = superAdmin && client.originalName ?
+                        `${client.originalName} (Admin: ${client.adminId})` : name;
+
+                    return [{
+                        text: `🌐 ${displayName}`,
+                        callback_data: `current_${name}_${superAdmin ? client.adminId || userId : userId}`
+                    }];
+                })
+            }
+        };
+
+        await bot.sendMessage(chatId, '🌐 Выберите клиента для проверки текущего прокси:', keyboard);
+        return;
+    }
+
+    if (text === '🌍 Мой IP' || text === '/myip') {
+        console.log(`🌍 Команда /myip от userId=${userId}`);
+
+        const adminClients = superAdmin ? getAllClients() : getAdminClients(userId);
+        const clientNames = Object.keys(adminClients);
+
+        if (clientNames.length === 0) {
+            await bot.sendMessage(chatId, '❌ Нет доступных клиентов');
+            return;
+        }
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: clientNames.map(name => {
+                    const client = adminClients[name];
+                    const displayName = superAdmin && client.originalName ?
+                        `${client.originalName} (Admin: ${client.adminId})` : name;
+
+                    return [{
+                        text: `🌍 ${displayName}`,
+                        callback_data: `myip_${name}_${superAdmin ? client.adminId || userId : userId}`
+                    }];
+                })
+            }
+        };
+
+        await bot.sendMessage(chatId, '🌍 Выберите клиента для проверки IP:', keyboard);
+        return;
+    }
+
+    // Команды только для супер-админа
+    if (text === '👥 Управление админами' || text === '/manageadmins') {
+        if (!superAdmin) {
+            await bot.sendMessage(chatId, '❌ Эта команда доступна только супер-админу');
+            return;
+        }
+
+        const adminsList = admins.length > 0 ? admins.join(', ') : 'Нет админов';
+        const message = `👥 Управление администраторами
+
+📋 Текущие админы: ${adminsList}
+
+Отправьте команду:
+• \`+123456789\` - добавить админа
+• \`-123456789\` - удалить админа
+• \`list\` - показать список админов`;
+
+        userStates[userId] = { action: 'managing_admins' };
+        await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+        return;
+    }
+
+    if (text === '🔄 Перезапуск' || text === '/restart') {
+        if (!superAdmin) {
+            await bot.sendMessage(chatId, '❌ Эта команда доступна только супер-админу');
+            return;
+        }
+
+        await bot.sendMessage(chatId, '🔄 Перезапуск бота...');
+        process.exit(0);
+    }
+
+    // ВАЖНО: Проверяем команды кнопок ПЕРЕД обработкой состояний
+    // Это предотвращает случайную обработку текста кнопок как данных для добавления клиента
+    const buttonCommands = [
+        '👤 Добавить клиента', '🗑️ Удалить клиента', '➕ Добавить прокси', '➖ Удалить прокси',
+        '📋 Мои клиенты', '📋 Все клиенты', '🔄 Ротация прокси', '💰 Баланс PROXY6', 
+        '🛒 Купить прокси', '🌐 Текущий прокси', '🌍 Мой IP', '👥 Управление админами', '🔄 Перезапуск'
+    ];
+
+    if (buttonCommands.includes(text)) {
+        // Сбрасываем состояние пользователя если он нажал кнопку
+        if (userStates[userId]) {
+            delete userStates[userId];
+            console.log(`🔄 Состояние пользователя ${userId} сброшено из-за нажатия кнопки: ${text}`);
+        }
+        await bot.sendMessage(chatId, `❌ Команда "${text}" не реализована или уже обработана выше. Используйте кнопки меню.`, getKeyboardForUser(userId));
+        return;
+    }
+
+    // Обработка состояний пользователей
+    if (userStates[userId]) {
+        const state = userStates[userId];
+
+        if (state.action === 'adding_client') {
+            console.log('📦 Получен ответ для добавления клиента');
+
+            const lines = text.trim().split('\n');
+            const parts = lines[0].trim().split(/\s+/);
+
+            if (parts.length < 2) {
+                await bot.sendMessage(chatId, '❌ Неверный формат. Используйте: логин пароль');
+                return;
+            }
+
+            const clientName = parts[0];
+            const password = parts[1];
+
+            // Проверяем, существует ли клиент у этого админа
+            const adminClients = getAdminClients(userId);
+            if (adminClients[clientName]) {
+                await bot.sendMessage(chatId, `❌ Клиент ${clientName} уже существует в вашей группе`);
+                delete userStates[userId];
+                return;
+            }
+
+            // Проверяем, существует ли клиент у других админов (для супер-админа)
+            if (superAdmin) {
+                const existingClient = findClientByName(clientName);
+                if (existingClient) {
+                    await bot.sendMessage(chatId, `❌ Клиент ${clientName} уже существует у админа ${existingClient.adminId}`);
+                    delete userStates[userId];
+                    return;
+                }
+            }
+
+            // Создаем клиента
+            adminClients[clientName] = {
+                password: password,
+                proxies: []
+            };
+
+            // Автоматическая покупка прокси через PROXY6.net
+            let proxyPurchaseMessage = '';
+            if (PROXY6_CONFIG.API_KEY) {
+                console.log(`🛒 Автоматическая покупка прокси включена для клиента ${clientName}`);
+
+                try {
+                    const purchaseResult = await buyProxy6Proxies(
+                        PROXY6_CONFIG.DEFAULT_COUNT,
+                        PROXY6_CONFIG.DEFAULT_PERIOD,
+                        PROXY6_CONFIG.DEFAULT_COUNTRY,
+                        PROXY6_CONFIG.DEFAULT_VERSION,
+                        `client_${clientName}_admin_${userId}`
+                    );
+
+                    if (purchaseResult.success) {
+                        console.log(`✅ Прокси успешно куплены:`, purchaseResult);
+
+                        // Конвертируем прокси в нужный формат
+                        const proxies = [];
+                        for (const [id, proxy] of Object.entries(purchaseResult.proxies)) {
+                            proxies.push(`${proxy.host}:${proxy.port}:${proxy.user}:${proxy.pass}`);
+                        }
+
+                        adminClients[clientName].proxies = proxies;
+                        proxyPurchaseMessage = `\n🛒 Автоматически куплено ${purchaseResult.count} прокси за ${purchaseResult.price} RUB`;
+
+                        console.log(`✅ Добавлено ${proxies.length} прокси к клиенту ${clientName}`);
+                    } else {
+                        console.log(`❌ Не удалось купить прокси автоматически: ${purchaseResult.error}`);
+                        proxyPurchaseMessage = `\n❌ Ошибка покупки прокси через PROXY6.net: ${purchaseResult.error}`;
+                    }
+                } catch (error) {
+                    console.error('❌ Ошибка автоматической покупки прокси:', error);
+                    proxyPurchaseMessage = `\n❌ Ошибка покупки прокси: ${error.message}`;
+                }
+            } else {
+                console.log(`❌ API ключ PROXY6.net не настроен, пропускаем автоматическую покупку`);
+                proxyPurchaseMessage = '\n⚠️ API ключ PROXY6.net не настроен';
+            }
+
+            saveClients();
+
+            // Добавляем клиента на прокси сервер
+            try {
+                console.log(`➕ Добавляем клиента на прокси сервер: ${clientName}`);
+                const serverResponse = await makeProxyServerRequest('/api/add-client', 'POST', {
+                    clientName: clientName,
+                    password: password,
+                    proxies: adminClients[clientName].proxies.map(formatProxyForRailway)
+                });
+
+                console.log(`✅ Клиент ${clientName} успешно добавлен на прокси сервер`);
+
+                await bot.sendMessage(chatId, `✅ Клиент ${clientName} добавлен в вашу группу!
+   👤 Логин: ${clientName}
+   🔐 Пароль: ${password}
+   🌐 Прокси: ${adminClients[clientName].proxies.length} шт.
+   👨‍💼 Админ: ${userId}${proxyPurchaseMessage}`, getKeyboardForUser(userId));
+
+            } catch (error) {
+                console.error('❌ Ошибка добавления клиента на прокси сервер:', error);
+                await bot.sendMessage(chatId, `✅ Клиент ${clientName} добавлен локально с ${adminClients[clientName].proxies.length} прокси${proxyPurchaseMessage}
+⚠️ Ошибка синхронизации с прокси сервером: ${error.message}`, getKeyboardForUser(userId));
+            }
+
+            delete userStates[userId];
+            return;
+        }
+
+        if (state.action === 'adding_proxy') {
+            console.log('📦 Получен ответ для добавления прокси');
+
+            const lines = text.trim().split('\n');
+            if (lines.length < 2) {
+                await bot.sendMessage(chatId, '❌ Неверный формат. Используйте:\nимя_клиента\nhost:port:user:pass');
+                return;
+            }
+
+            const clientName = lines[0].trim();
+            const proxyLines = lines.slice(1);
+
+            // Находим клиента
+            const clientInfo = superAdmin ? 
+                findClientByName(clientName) : 
+                findClientByName(clientName, userId);
+
+            if (!clientInfo) {
+                await bot.sendMessage(chatId, `❌ Клиент ${clientName} не найден или у вас нет к нему доступа`);
+                delete userStates[userId];
+                return;
+            }
+
+            // Проверяем права доступа
+            if (!superAdmin && clientInfo.adminId != userId) {
+                await bot.sendMessage(chatId, `❌ У вас нет доступа к клиенту ${clientName}`);
+                delete userStates[userId];
+                return;
+            }
+
+            // Парсим прокси
+            const newProxies = [];
+            for (const proxyLine of proxyLines) {
+                const proxy = proxyLine.trim();
+                if (proxy) {
+                    const parts = proxy.split(':');
+                    if (parts.length === 4) {
+                        newProxies.push(proxy);
+                    } else {
+                        await bot.sendMessage(chatId, `❌ Неверный формат прокси: ${proxy}\nИспользуйте: host:port:user:pass`);
+                        return;
+                    }
+                }
+            }
+
+            if (newProxies.length === 0) {
+                await bot.sendMessage(chatId, '❌ Не найдено валидных прокси');
+                return;
+            }
+
+            // Добавляем прокси к клиенту
+            const adminClients = getAdminClients(clientInfo.adminId);
+            adminClients[clientInfo.clientName].proxies.push(...newProxies);
+            saveClients();
+
+            // Обновляем прокси на сервере
+            try {
+                await makeProxyServerRequest('/api/add-proxy', 'POST', {
+                    name: clientInfo.clientName,
+                    proxies: newProxies.map(formatProxyForRailway)
+                });
+            } catch (error) {
+                console.error('❌ Ошибка добавления прокси на сервер:', error);
+            }
+
+            await bot.sendMessage(chatId, `✅ Добавлено ${newProxies.length} прокси к клиенту ${clientName}
+🌐 Всего прокси у клиента: ${adminClients[clientInfo.clientName].proxies.length}
+👨‍💼 Админ: ${clientInfo.adminId}`, getKeyboardForUser(userId));
+
+            delete userStates[userId];
+            return;
+        }
+
+        // Обработка управления админами
+        if (state.action === 'managing_admins' && superAdmin) {
+            if (text === 'list') {
+                const adminsList = admins.length > 0 ? admins.join(', ') : 'Нет админов';
+                await bot.sendMessage(chatId, `📋 Список админов: ${adminsList}`);
+                return;
+            }
+
+            if (text.startsWith('+')) {
+                const newAdminId = parseInt(text.substring(1));
+                if (isNaN(newAdminId)) {
+                    await bot.sendMessage(chatId, '❌ Неверный формат ID');
+                    return;
+                }
+
+                if (admins.includes(newAdminId)) {
+                    await bot.sendMessage(chatId, `❌ Пользователь ${newAdminId} уже является админом`);
+                    return;
+                }
+
+                admins.push(newAdminId);
+                saveAdmins();
+                await bot.sendMessage(chatId, `✅ Пользователь ${newAdminId} добавлен в админы`);
+                return;
+            }
+
+            if (text.startsWith('-')) {
+                const removeAdminId = parseInt(text.substring(1));
+                if (isNaN(removeAdminId)) {
+                    await bot.sendMessage(chatId, '❌ Неверный формат ID');
+                    return;
+                }
+
+                const index = admins.indexOf(removeAdminId);
+                if (index === -1) {
+                    await bot.sendMessage(chatId, `❌ Пользователь ${removeAdminId} не является админом`);
+                    return;
+                }
+
+                admins.splice(index, 1);
+                saveAdmins();
+                await bot.sendMessage(chatId, `✅ Пользователь ${removeAdminId} удален из админов`);
+                return;
+            }
+
+            await bot.sendMessage(chatId, '❌ Неверная команда. Используйте +ID, -ID или list');
+            return;
+        }
+    }
+
+    // Если команда не распознана
+    await bot.sendMessage(chatId, '❌ Неизвестная команда. Используйте кнопки ниже для управления.', getKeyboardForUser(userId));
+});
+
+// Обработка callback запросов
+bot.on('callback_query', async (callbackQuery) => {
+    const chatId = callbackQuery.message.chat.id;
+    const userId = callbackQuery.from.id;
+    const data = callbackQuery.data;
+
+    console.log(`🔘 Callback: ${data} от userId=${userId}`);
+
+    if (!isAuthorized(userId)) {
+        await bot.answerCallbackQuery(callbackQuery.id, { text: '❌ Нет доступа' });
+        return;
+    }
+
+    const superAdmin = isSuperAdmin(userId);
+
+    // Обработка удаления клиента
+    if (data.startsWith('delete_')) {
+        const parts = data.split('_');
+        const clientName = parts[1];
+        const adminId = parts[2];
+
+        // Проверяем права доступа
+        if (!superAdmin && adminId != userId) {
+            await bot.answerCallbackQuery(callbackQuery.id, { text: '❌ Нет доступа к этому клиенту' });
+            return;
+        }
+
+        const adminClients = getAdminClients(adminId);
+        if (!adminClients[clientName]) {
+            await bot.editMessageText('❌ Клиент не найден', {
+                chat_id: chatId,
+                message_id: callbackQuery.message.message_id
+            });
+            await bot.answerCallbackQuery(callbackQuery.id);
+            return;
+        }
+
+        // Удаляем клиента локально
+        delete adminClients[clientName];
+        saveClients();
+
+        // Удаляем с прокси сервера (исправленный запрос)
+        try {
+            const deleteResult = await deleteClientFromServer(clientName);
+            if (deleteResult.success) {
+                console.log('✅ Клиент успешно удален с прокси сервера');
+            } else {
+                console.error('❌ Ошибка удаления с сервера:', deleteResult.error);
+            }
+        } catch (error) {
+            console.error('❌ Ошибка удаления клиента с сервера:', error);
+        }
+
+        await bot.editMessageText(
+            `✅ Клиент ${clientName} успешно удален
+👨‍💼 Админ: ${adminId}`,
+            {
+                chat_id: chatId,
+                message_id: callbackQuery.message.message_id
+            }
+        );
+
+        await bot.answerCallbackQuery(callbackQuery.id);
+        return;
+    }
+
+    // Обработка покупки прокси
+    if (data.startsWith('buy_proxy_')) {
+        const parts = data.split('_');
+        const clientName = parts[2];
+        const adminId = parts[3];
+
+        // Проверяем права доступа
+        if (!superAdmin && adminId != userId) {
+            await bot.answerCallbackQuery(callbackQuery.id, { text: '❌ Нет доступа к этому клиенту' });
+            return;
+        }
+
+        const adminClients = getAdminClients(adminId);
+        if (!adminClients[clientName]) {
+            await bot.editMessageText('❌ Клиент не найден', {
+                chat_id: chatId,
+                message_id: callbackQuery.message.message_id
+            });
+            await bot.answerCallbackQuery(callbackQuery.id);
+            return;
+        }
+
+        try {
+            const purchaseResult = await buyProxy6Proxies(
+                PROXY6_CONFIG.DEFAULT_COUNT,
+                PROXY6_CONFIG.DEFAULT_PERIOD,
+                PROXY6_CONFIG.DEFAULT_COUNTRY,
+                PROXY6_CONFIG.DEFAULT_VERSION,
+                `client_${clientName}_admin_${adminId}_manual`
+            );
+
+            if (purchaseResult.success) {
+                // Добавляем новые прокси к существующим
+                const newProxies = [];
+                for (const [id, proxy] of Object.entries(purchaseResult.proxies)) {
+                    newProxies.push(`${proxy.host}:${proxy.port}:${proxy.user}:${proxy.pass}`);
+                }
+
+                adminClients[clientName].proxies.push(...newProxies);
+                saveClients();
+
+                // Обновляем прокси на сервере
+                try {
+                    await makeProxyServerRequest('/api/add-proxy', 'POST', {
+                        name: clientName,
+                        proxies: newProxies.map(formatProxyForRailway)
+                    });
+                } catch (error) {
+                    console.error('❌ Ошибка обновления прокси на сервере:', error);
+                }
+
+                await bot.editMessageText(
+                    `✅ Успешно куплено ${purchaseResult.count} прокси для клиента ${clientName}
+💰 Стоимость: ${purchaseResult.price} RUB
+📦 Заказ: #${purchaseResult.order_id}
+🌐 Всего прокси у клиента: ${adminClients[clientName].proxies.length}
+👨‍💼 Админ: ${adminId}`,
+                    {
+                        chat_id: chatId,
+                        message_id: callbackQuery.message.message_id
+                    }
+                );
+            } else {
+                await bot.editMessageText(
+                    `❌ Ошибка покупки прокси: ${purchaseResult.error}`,
+                    {
+                        chat_id: chatId,
+                        message_id: callbackQuery.message.message_id
+                    }
+                );
+            }
+        } catch (error) {
+            await bot.editMessageText(
+                `❌ Ошибка: ${error.message}`,
+                {
+                    chat_id: chatId,
+                    message_id: callbackQuery.message.message_id
+                }
+            );
+        }
+
+        await bot.answerCallbackQuery(callbackQuery.id);
+        return;
+    }
+
+    // Обработка удаления прокси
+    if (data.startsWith('remove_proxy_')) {
+        const parts = data.split('_');
+        const clientName = parts[2];
+        const adminId = parts[3];
+
+        // Проверяем права доступа
+        if (!superAdmin && adminId != userId) {
+            await bot.answerCallbackQuery(callbackQuery.id, { text: '❌ Нет доступа к этому клиенту' });
+            return;
+        }
+
+        const adminClients = getAdminClients(adminId);
+        if (!adminClients[clientName]) {
+            await bot.editMessageText('❌ Клиент не найден', {
+                chat_id: chatId,
+                message_id: callbackQuery.message.message_id
+            });
+            await bot.answerCallbackQuery(callbackQuery.id);
+            return;
+        }
+
+        const client = adminClients[clientName];
+        if (!client.proxies || client.proxies.length === 0) {
+            await bot.editMessageText(`❌ У клиента ${clientName} нет прокси для удаления`, {
+                chat_id: chatId,
+                message_id: callbackQuery.message.message_id
+            });
+            await bot.answerCallbackQuery(callbackQuery.id);
+            return;
+        }
+
+        // Удаляем последний прокси
+        const removedProxy = client.proxies.pop();
+        saveClients();
+
+        // Обновляем прокси на сервере
+        try {
+            await makeProxyServerRequest('/api/remove-proxy', 'DELETE', {
+                clientName: clientName,
+                proxy: removedProxy
+            });
+        } catch (error) {
+            console.error('❌ Ошибка удаления прокси на сервере:', error);
+        }
+
+        await bot.editMessageText(
+            `✅ Прокси удален у клиента ${clientName}
+🗑️ Удаленный прокси: ${removedProxy.split(':')[0]}:${removedProxy.split(':')[1]}
+🌐 Осталось прокси: ${client.proxies.length}
+👨‍💼 Админ: ${adminId}`,
+            {
+                chat_id: chatId,
+                message_id: callbackQuery.message.message_id
+            }
+        );
+
+        await bot.answerCallbackQuery(callbackQuery.id);
+        return;
+    }
+
+    // Обработка ротации прокси
+    if (data.startsWith('rotate_')) {
+        const parts = data.split('_');
+        const clientName = parts[1];
+        const adminId = parts[2];
+
+        // Проверяем права доступа
+        if (!superAdmin && adminId != userId) {
+            await bot.answerCallbackQuery(callbackQuery.id, { text: '❌ Нет доступа к этому клиенту' });
+            return;
+        }
+
+        try {
+            const result = await rotateClientProxy(clientName);
+
+            await bot.editMessageText(
+                `🔄 Прокси для клиента ${clientName} успешно ротирован
+🌐 Новый прокси: ${result.newProxy || 'Скрыт'}
+👨‍💼 Админ: ${adminId}`,
+                {
+                    chat_id: chatId,
+                    message_id: callbackQuery.message.message_id
+                }
+            );
+        } catch (error) {
+            await bot.editMessageText(
+                `❌ Ошибка ротации прокси для ${clientName}: ${error.message}`,
+                {
+                    chat_id: chatId,
+                    message_id: callbackQuery.message.message_id
+                }
+            );
+        }
+
+        await bot.answerCallbackQuery(callbackQuery.id);
+        return;
+    }
+
+    // Обработка проверки текущего прокси
+    if (data.startsWith('current_')) {
+        const parts = data.split('_');
+        const clientName = parts[1];
+        const adminId = parts[2];
+
+        // Проверяем права доступа
+        if (!superAdmin && adminId != userId) {
+            await bot.answerCallbackQuery(callbackQuery.id, { text: '❌ Нет доступа к этому клиенту' });
+            return;
+        }
+
+        const adminClients = getAdminClients(adminId);
+        if (!adminClients[clientName]) {
+            await bot.editMessageText('❌ Клиент не найден', {
+                chat_id: chatId,
+                message_id: callbackQuery.message.message_id
+            });
+            await bot.answerCallbackQuery(callbackQuery.id);
+            return;
+        }
+
+        try {
+            const result = await getCurrentProxy(clientName, adminClients[clientName].password);
+
+            await bot.editMessageText(
+                `🌐 Текущий прокси для клиента ${clientName}:
+📍 ${result.proxy || 'Не найден'}
+🌍 Страна: ${result.country || 'Неизвестно'}
+👨‍💼 Админ: ${adminId}`,
+                {
+                    chat_id: chatId,
+                    message_id: callbackQuery.message.message_id
+                }
+            );
+        } catch (error) {
+            await bot.editMessageText(
+                `❌ Ошибка получения прокси для ${clientName}: ${error.message}`,
+                {
+                    chat_id: chatId,
+                    message_id: callbackQuery.message.message_id
+                }
+            );
+        }
+
+        await bot.answerCallbackQuery(callbackQuery.id);
+        return;
+    }
+
+    // Обработка проверки IP
+    if (data.startsWith('myip_')) {
+        const parts = data.split('_');
+        const clientName = parts[1];
+        const adminId = parts[2];
+
+        // Проверяем права доступа
+        if (!superAdmin && adminId != userId) {
+            await bot.answerCallbackQuery(callbackQuery.id, { text: '❌ Нет доступа к этому клиенту' });
+            return;
+        }
+
+        const adminClients = getAdminClients(adminId);
+        if (!adminClients[clientName]) {
+            await bot.editMessageText('❌ Клиент не найден', {
+                chat_id: chatId,
+                message_id: callbackQuery.message.message_id
+            });
+            await bot.answerCallbackQuery(callbackQuery.id);
+            return;
+        }
+
+        try {
+            const result = await getMyIP(clientName, adminClients[clientName].password);
+
+            await bot.editMessageText(
+                `🌍 IP адрес клиента ${clientName}:
+📍 ${result.ip || 'Не определен'}
+🌍 Страна: ${result.country || 'Неизвестно'}
+🏙️ Город: ${result.city || 'Неизвестно'}
+👨‍💼 Админ: ${adminId}`,
+                {
+                    chat_id: chatId,
+                    message_id: callbackQuery.message.message_id
+                }
+            );
+        } catch (error) {
+            await bot.editMessageText(
+                `❌ Ошибка получения IP для ${clientName}: ${error.message}`,
+                {
+                    chat_id: chatId,
+                    message_id: callbackQuery.message.message_id
+                }
+            );
+        }
+
+        await bot.answerCallbackQuery(callbackQuery.id);
+        return;
+    }
+
+    await bot.answerCallbackQuery(callbackQuery.id);
+});
+
+// Инициализация
+loadClients();
+loadAdmins();
+
+console.log('🚀 Telegram Bot запущен с исправленным API!');
+console.log(`👑 Супер-админ ID: ${SUPER_ADMIN_ID}`);
+console.log(`👥 Админов: ${admins.length}`);
+console.log(`🛒 PROXY6.net API: ${PROXY6_CONFIG.API_KEY ? '✅ Настроен' : '❌ Не настроен'}`);
+console.log(`🌐 Прокси сервер: ${PROXY_SERVER_URL}`);
+
+// Health endpoint
+const express = require('express');
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get('/health', (req, res) => {
+    const totalClients = Object.values(clients).reduce((sum, adminClients) => sum + Object.keys(adminClients).length, 0);
+
+    res.json({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        total_clients: totalClients,
+        admins_count: admins.length,
+        proxy6_configured: !!PROXY6_CONFIG.API_KEY,
+        proxy_server: PROXY_SERVER_URL,
+        clients_by_admin: Object.fromEntries(
+            Object.entries(clients).map(([adminId, adminClients]) => [
+                adminId, Object.keys(adminClients).length
+            ])
+        )
+    });
+});
+
+app.listen(PORT, () => {
+    console.log(`🌐 Health endpoint доступен на порту ${PORT}`);
+});
+
 
 // Функция для проверки и форматирования прокси
 function formatProxyForRailway(proxy) {
@@ -104,818 +1400,3 @@ function formatProxyForRailway(proxy) {
     console.error('❌ Неверный формат прокси:', proxy);
     return null;
 }
-
-// PROXY6.net API функции
-async function checkProxy6Balance() {
-    try {
-        const response = await axios.get(`${PROXY6_BASE_URL}/${PROXY6_API_KEY}/getbalance`);
-        if (response.data.status === 'yes') {
-            return {
-                success: true,
-                balance: response.data.balance,
-                currency: response.data.currency
-            };
-        }
-        return { success: false, error: response.data.error || 'Unknown error' };
-    } catch (error) {
-        console.error('❌ Ошибка проверки баланса PROXY6:', error.message);
-        return { success: false, error: error.message };
-    }
-}
-
-async function getProxy6Price(count = 1, period = 7, version = 3) {
-    try {
-        const response = await axios.get(`${PROXY6_BASE_URL}/${PROXY6_API_KEY}/getprice`, {
-            params: {
-                count,
-                period,
-                version
-            }
-        });
-        
-        if (response.data.status === 'yes') {
-            return {
-                success: true,
-                price: response.data.price,
-                pricePerProxy: response.data.price_single,
-                currency: response.data.currency
-            };
-        }
-        return { success: false, error: response.data.error || 'Unknown error' };
-    } catch (error) {
-        console.error('❌ Ошибка получения цены PROXY6:', error.message);
-        return { success: false, error: error.message };
-    }
-}
-
-async function buyProxy6Proxies(count = 1, period = 7, country = 'ru', version = 3, type = 'http') {
-    try {
-        const response = await axios.get(`${PROXY6_BASE_URL}/${PROXY6_API_KEY}/buy`, {
-            params: {
-                count,
-                period,
-                country,
-                version,
-                type
-            }
-        });
-        
-        if (response.data.status === 'yes') {
-            const proxies = [];
-            const proxyList = response.data.list || {};
-            
-            Object.values(proxyList).forEach(proxy => {
-                const formattedProxy = `${proxy.host}:${proxy.port}:${proxy.user}:${proxy.pass}`;
-                proxies.push(formattedProxy);
-            });
-            
-            console.log(`📦 Получено ${proxies.length} прокси от PROXY6`);
-            console.log(`📋 Первые 3 прокси:`, proxies.slice(0, 3));
-            
-            return {
-                success: true,
-                proxies,
-                orderId: response.data.order_id,
-                count: response.data.count,
-                price: response.data.price
-            };
-        }
-        return { success: false, error: response.data.error || 'Unknown error' };
-    } catch (error) {
-        console.error('❌ Ошибка покупки прокси PROXY6:', error.message);
-        return { success: false, error: error.message };
-    }
-}
-
-// Функции для работы с Railway Proxy Server
-async function addClientToProxyServer(clientName, password, proxies = []) {
-    try {
-        // Форматируем прокси для Railway
-        const formattedProxies = proxies.map(proxy => formatProxyForRailway(proxy)).filter(p => p !== null);
-        
-        console.log(`🔧 Добавляем клиента ${clientName} с ${formattedProxies.length} прокси`);
-        
-        const response = await axios.post(`${RAILWAY_PROXY_URL}/api/add-client`, {
-            clientName,
-            password,
-            proxies: formattedProxies
-        });
-        
-        return { success: true, data: response.data };
-    } catch (error) {
-        console.error('❌ Ошибка добавления клиента на прокси сервер:', error.response?.data?.error || error.message);
-        return { success: false, error: error.response?.data?.error || error.message };
-    }
-}
-
-async function removeClientFromProxyServer(clientName) {
-    try {
-        const response = await axios.delete(`${RAILWAY_PROXY_URL}/api/delete-client/${clientName}`);
-        return { success: true, data: response.data };
-    } catch (error) {
-        console.error('❌ Ошибка удаления клиента:', error.response?.data?.error || error.message);
-        return { success: false, error: error.response?.data?.error || error.message };
-    }
-}
-
-async function addProxyToClient(clientName, proxy) {
-    try {
-        const formattedProxy = formatProxyForRailway(proxy);
-        if (!formattedProxy) {
-            return { success: false, error: 'Неверный формат прокси' };
-        }
-        
-        const response = await axios.post(`${RAILWAY_PROXY_URL}/api/add-proxy`, {
-            clientName,
-            proxy: formattedProxy
-        });
-        
-        return { success: true, data: response.data };
-    } catch (error) {
-        console.error('❌ Ошибка добавления прокси:', error.response?.data?.error || error.message);
-        return { success: false, error: error.response?.data?.error || error.message };
-    }
-}
-
-async function removeProxyFromClient(clientName, proxy) {
-    try {
-        const response = await axios.delete(`${RAILWAY_PROXY_URL}/api/remove-proxy`, {
-            data: {
-                clientName,
-                proxy
-            }
-        });
-        
-        return { success: true, data: response.data };
-    } catch (error) {
-        console.error('❌ Ошибка удаления прокси:', error.response?.data?.error || error.message);
-        return { success: false, error: error.response?.data?.error || error.message };
-    }
-}
-
-async function rotateClientProxy(clientName) {
-    try {
-        const response = await axios.post(`${RAILWAY_PROXY_URL}/api/rotate-client`, {
-            clientName
-        });
-        
-        return { success: true, data: response.data };
-    } catch (error) {
-        console.error('❌ Ошибка ротации прокси:', error.response?.data?.error || error.message);
-        return { success: false, error: error.response?.data?.error || error.message };
-    }
-}
-
-async function getClientsFromProxyServer() {
-    try {
-        const response = await axios.get(`${RAILWAY_PROXY_URL}/api/clients`);
-        return { success: true, data: response.data };
-    } catch (error) {
-        console.error('❌ Ошибка получения клиентов:', error.response?.data?.error || error.message);
-        return { success: false, error: error.response?.data?.error || error.message };
-    }
-}
-
-// Клавиатуры
-function getMainKeyboard() {
-    return {
-        keyboard: [
-            ['➕ Добавить клиента', '➖ Удалить клиента'],
-            ['📋 Список клиентов', '🔄 Ротация прокси'],
-            ['💰 Баланс PROXY6', '🛒 Купить прокси'],
-            ['👥 Управление админами']
-        ],
-        resize_keyboard: true,
-        one_time_keyboard: false
-    };
-}
-
-function getAdminKeyboard() {
-    return {
-        keyboard: [
-            ['➕ Добавить админа', '➖ Удалить админа'],
-            ['📋 Список админов', '🔙 Назад']
-        ],
-        resize_keyboard: true,
-        one_time_keyboard: false
-    };
-}
-
-// Функция для очистки состояния пользователя
-function clearUserState(userId) {
-    delete userStates[userId];
-    saveUserStates();
-}
-
-// Обработчики команд
-bot.onText(/^\/start$/, async (msg) => {
-    const userId = msg.from.id;
-    
-    if (!isAdmin(userId)) {
-        return bot.sendMessage(userId, '❌ У вас нет доступа к этому боту.');
-    }
-    
-    // Очищаем состояние при старте
-    clearUserState(userId);
-    
-    const welcomeMessage = `🤖 Добро пожаловать в Proxy Manager Bot!
-
-🔧 Доступные функции:
-• Управление клиентами прокси-сервера
-• Автоматическая покупка прокси через PROXY6.net
-• Ротация прокси для клиентов
-• Мониторинг баланса PROXY6
-
-${isSuperAdmin(userId) ? '👑 Вы супер-админ - доступны все функции' : '👤 Вы админ - доступны основные функции'}
-
-Используйте кнопки ниже для управления:`;
-
-    await bot.sendMessage(userId, welcomeMessage, {
-        reply_markup: getMainKeyboard()
-    });
-});
-
-// Обработка текстовых сообщений
-bot.on('message', async (msg) => {
-    const userId = msg.from.id;
-    const text = msg.text;
-    
-    if (!isAdmin(userId)) {
-        return;
-    }
-    
-    // Обработка команд управления админами через + и -
-    if (text && text.startsWith('+') && isSuperAdmin(userId)) {
-        const adminIdStr = text.substring(1).trim();
-        const adminId = parseInt(adminIdStr);
-        
-        if (isNaN(adminId)) {
-            return bot.sendMessage(userId, '❌ Неверный формат ID админа. Используйте: +123456789');
-        }
-        
-        if (admins.hasOwnProperty(adminId.toString())) {
-            return bot.sendMessage(userId, '❌ Этот пользователь уже является админом.');
-        }
-        
-        admins[adminId.toString()] = {
-            id: adminId,
-            addedBy: userId,
-            addedAt: new Date().toISOString()
-        };
-        
-        await saveAdmins();
-        
-        return bot.sendMessage(userId, `✅ Админ ${adminId} успешно добавлен!`);
-    }
-    
-    if (text && text.startsWith('-') && isSuperAdmin(userId)) {
-        const adminIdStr = text.substring(1).trim();
-        const adminId = parseInt(adminIdStr);
-        
-        if (isNaN(adminId)) {
-            return bot.sendMessage(userId, '❌ Неверный формат ID админа. Используйте: -123456789');
-        }
-        
-        if (adminId === SUPER_ADMIN_ID) {
-            return bot.sendMessage(userId, '❌ Нельзя удалить супер-админа.');
-        }
-        
-        if (!admins.hasOwnProperty(adminId.toString())) {
-            return bot.sendMessage(userId, '❌ Этот пользователь не является админом.');
-        }
-        
-        delete admins[adminId.toString()];
-        await saveAdmins();
-        
-        return bot.sendMessage(userId, `✅ Админ ${adminId} успешно удален!`);
-    }
-    
-    // Проверяем, есть ли состояние у пользователя
-    if (userStates[userId]) {
-        // Проверяем, не является ли это кнопкой меню
-        const menuButtons = [
-            '➕ Добавить клиента', '➖ Удалить клиента', '📋 Список клиентов', 
-            '🔄 Ротация прокси', '💰 Баланс PROXY6', '🛒 Купить прокси',
-            '👥 Управление админами', '➕ Добавить админа', '➖ Удалить админа',
-            '📋 Список админов', '🔙 Назад'
-        ];
-        
-        if (menuButtons.includes(text)) {
-            // Очищаем состояние и обрабатываем как обычную кнопку
-            clearUserState(userId);
-        } else {
-            // Обрабатываем как ввод в состоянии
-            await handleUserState(userId, text);
-            return;
-        }
-    }
-    
-    // Обработка кнопок главного меню
-    switch (text) {
-        case '➕ Добавить клиента':
-            await handleAddClientStart(userId);
-            break;
-            
-        case '➖ Удалить клиента':
-            await handleDeleteClientStart(userId);
-            break;
-            
-        case '📋 Список клиентов':
-            await handleListClients(userId);
-            break;
-            
-        case '🔄 Ротация прокси':
-            await handleRotateProxyStart(userId);
-            break;
-            
-        case '💰 Баланс PROXY6':
-            await handleCheckBalance(userId);
-            break;
-            
-        case '🛒 Купить прокси':
-            await handleBuyProxyStart(userId);
-            break;
-            
-        case '👥 Управление админами':
-            if (isSuperAdmin(userId)) {
-                await handleAdminManagement(userId);
-            } else {
-                await bot.sendMessage(userId, '❌ Только супер-админ может управлять админами.');
-            }
-            break;
-            
-        case '➕ Добавить админа':
-            if (isSuperAdmin(userId)) {
-                await handleAddAdminStart(userId);
-            }
-            break;
-            
-        case '➖ Удалить админа':
-            if (isSuperAdmin(userId)) {
-                await handleDeleteAdminStart(userId);
-            }
-            break;
-            
-        case '📋 Список админов':
-            if (isSuperAdmin(userId)) {
-                await handleListAdmins(userId);
-            }
-            break;
-            
-        case '🔙 Назад':
-            clearUserState(userId);
-            await bot.sendMessage(userId, '🏠 Главное меню:', {
-                reply_markup: getMainKeyboard()
-            });
-            break;
-    }
-});
-
-// Обработчики состояний
-async function handleUserState(userId, text) {
-    const state = userStates[userId];
-    
-    switch (state.action) {
-        case 'add_client_name':
-            await handleAddClientName(userId, text);
-            break;
-            
-        case 'add_client_password':
-            await handleAddClientPassword(userId, text);
-            break;
-            
-        case 'delete_client':
-            await handleDeleteClient(userId, text);
-            break;
-            
-        case 'rotate_proxy':
-            await handleRotateProxy(userId, text);
-            break;
-            
-        case 'buy_proxy_client':
-            await handleBuyProxyClient(userId, text);
-            break;
-            
-        case 'add_admin':
-            await handleAddAdmin(userId, text);
-            break;
-            
-        case 'delete_admin':
-            await handleDeleteAdmin(userId, text);
-            break;
-    }
-}
-
-// Функции обработки добавления клиента
-async function handleAddClientStart(userId) {
-    userStates[userId] = { action: 'add_client_name' };
-    await saveUserStates();
-    
-    await bot.sendMessage(userId, '📝 Введите имя нового клиента:');
-}
-
-async function handleAddClientName(userId, clientName) {
-    if (!clientName || clientName.length < 2) {
-        return bot.sendMessage(userId, '❌ Имя клиента должно содержать минимум 2 символа. Попробуйте еще раз:');
-    }
-    
-    userStates[userId] = { 
-        action: 'add_client_password',
-        clientName: clientName.trim()
-    };
-    await saveUserStates();
-    
-    await bot.sendMessage(userId, `📝 Введите пароль для клиента "${clientName}":`);
-}
-
-async function handleAddClientPassword(userId, password) {
-    if (!password || password.length < 4) {
-        return bot.sendMessage(userId, '❌ Пароль должен содержать минимум 4 символа. Попробуйте еще раз:');
-    }
-    
-    const { clientName } = userStates[userId];
-    
-    // Автоматически покупаем прокси если настроен PROXY6
-    let proxies = [];
-    if (PROXY6_API_KEY) {
-        await bot.sendMessage(userId, '🛒 Покупаем прокси для нового клиента...');
-        
-        const buyResult = await buyProxy6Proxies(30, 7, 'ru', 4, 'http');
-        if (buyResult.success) {
-            proxies = buyResult.proxies;
-            await bot.sendMessage(userId, `✅ Куплено ${proxies.length} прокси за ${buyResult.price} RUB`);
-        } else {
-            await bot.sendMessage(userId, `⚠️ Не удалось купить прокси: ${buyResult.error}`);
-        }
-    }
-    
-    // Добавляем клиента на прокси сервер
-    const result = await addClientToProxyServer(clientName, password, proxies);
-    
-    if (result.success) {
-        await bot.sendMessage(userId, `✅ Клиент "${clientName}" успешно добавлен с ${proxies.length} прокси!`, {
-            reply_markup: getMainKeyboard()
-        });
-    } else {
-        await bot.sendMessage(userId, `❌ Ошибка добавления клиента: ${result.error}`, {
-            reply_markup: getMainKeyboard()
-        });
-    }
-    
-    clearUserState(userId);
-}
-
-// Функции обработки удаления клиента
-async function handleDeleteClientStart(userId) {
-    const clientsResult = await getClientsFromProxyServer();
-    
-    if (!clientsResult.success) {
-        return bot.sendMessage(userId, `❌ Ошибка получения списка клиентов: ${clientsResult.error}`);
-    }
-    
-    const clients = Object.keys(clientsResult.data.clients);
-    
-    if (clients.length === 0) {
-        return bot.sendMessage(userId, '📭 Нет клиентов для удаления.');
-    }
-    
-    userStates[userId] = { action: 'delete_client' };
-    await saveUserStates();
-    
-    const clientsList = clients.map((name, index) => `${index + 1}. ${name}`).join('\n');
-    await bot.sendMessage(userId, `📋 Выберите клиента для удаления (введите имя):\n\n${clientsList}`);
-}
-
-async function handleDeleteClient(userId, clientName) {
-    const result = await removeClientFromProxyServer(clientName.trim());
-    
-    if (result.success) {
-        await bot.sendMessage(userId, `✅ Клиент "${clientName}" успешно удален!`, {
-            reply_markup: getMainKeyboard()
-        });
-    } else {
-        await bot.sendMessage(userId, `❌ Ошибка удаления клиента: ${result.error}`, {
-            reply_markup: getMainKeyboard()
-        });
-    }
-    
-    clearUserState(userId);
-}
-
-// Функции обработки списка клиентов
-async function handleListClients(userId) {
-    const result = await getClientsFromProxyServer();
-    
-    if (!result.success) {
-        return bot.sendMessage(userId, `❌ Ошибка получения списка клиентов: ${result.error}`);
-    }
-    
-    const clients = result.data.clients;
-    const clientNames = Object.keys(clients);
-    
-    if (clientNames.length === 0) {
-        return bot.sendMessage(userId, '📭 Нет активных клиентов.');
-    }
-    
-    let message = `📋 Список клиентов (${clientNames.length}):\n\n`;
-    
-    clientNames.forEach((name, index) => {
-        const client = clients[name];
-        message += `${index + 1}. 👤 ${name}\n`;
-        message += `   📊 Прокси: ${client.totalProxies}\n`;
-        message += `   🔄 Ротаций: ${client.rotationCount}\n`;
-        message += `   🌐 Текущий: ${client.currentProxy || 'нет'}\n`;
-        message += `   🔗 Туннели: ${client.activeTunnels}\n\n`;
-    });
-    
-    await bot.sendMessage(userId, message);
-}
-
-// Функции обработки ротации прокси
-async function handleRotateProxyStart(userId) {
-    const clientsResult = await getClientsFromProxyServer();
-    
-    if (!clientsResult.success) {
-        return bot.sendMessage(userId, `❌ Ошибка получения списка клиентов: ${clientsResult.error}`);
-    }
-    
-    const clients = Object.keys(clientsResult.data.clients);
-    
-    if (clients.length === 0) {
-        return bot.sendMessage(userId, '📭 Нет клиентов для ротации прокси.');
-    }
-    
-    userStates[userId] = { action: 'rotate_proxy' };
-    await saveUserStates();
-    
-    const clientsList = clients.map((name, index) => `${index + 1}. ${name}`).join('\n');
-    await bot.sendMessage(userId, `🔄 Выберите клиента для ротации прокси (введите имя):\n\n${clientsList}`);
-}
-
-async function handleRotateProxy(userId, clientName) {
-    const result = await rotateClientProxy(clientName.trim());
-    
-    if (result.success) {
-        const data = result.data;
-        await bot.sendMessage(userId, 
-            `✅ Прокси для "${clientName}" успешно ротирован!\n\n` +
-            `🔄 Ротация #${data.rotationCount}\n` +
-            `📊 Старый: ${data.oldProxy || 'нет'}\n` +
-            `🆕 Новый: ${data.newProxy || 'нет'}\n` +
-            `🔗 Закрыто туннелей: ${data.closedTunnels}`,
-            { reply_markup: getMainKeyboard() }
-        );
-    } else {
-        await bot.sendMessage(userId, `❌ Ошибка ротации прокси: ${result.error}`, {
-            reply_markup: getMainKeyboard()
-        });
-    }
-    
-    clearUserState(userId);
-}
-
-// Функции обработки баланса PROXY6
-async function handleCheckBalance(userId) {
-    if (!PROXY6_API_KEY) {
-        return bot.sendMessage(userId, '❌ PROXY6 API ключ не настроен.');
-    }
-    
-    await bot.sendMessage(userId, '💰 Проверяем баланс PROXY6...');
-    
-    const result = await checkProxy6Balance();
-    
-    if (result.success) {
-        await bot.sendMessage(userId, 
-            `💰 Баланс PROXY6:\n\n` +
-            `💵 ${result.balance} ${result.currency}`
-        );
-    } else {
-        await bot.sendMessage(userId, `❌ Ошибка проверки баланса: ${result.error}`);
-    }
-}
-
-// Функции обработки покупки прокси
-async function handleBuyProxyStart(userId) {
-    const clientsResult = await getClientsFromProxyServer();
-    
-    if (!clientsResult.success) {
-        return bot.sendMessage(userId, `❌ Ошибка получения списка клиентов: ${clientsResult.error}`);
-    }
-    
-    const clients = Object.keys(clientsResult.data.clients);
-    
-    if (clients.length === 0) {
-        return bot.sendMessage(userId, '📭 Нет клиентов. Сначала добавьте клиента.');
-    }
-    
-    userStates[userId] = { action: 'buy_proxy_client' };
-    await saveUserStates();
-    
-    const clientsList = clients.map((name, index) => `${index + 1}. ${name}`).join('\n');
-    await bot.sendMessage(userId, `🛒 Выберите клиента для покупки прокси (введите имя):\n\n${clientsList}`);
-}
-
-async function handleBuyProxyClient(userId, clientName) {
-    if (!PROXY6_API_KEY) {
-        clearUserState(userId);
-        return bot.sendMessage(userId, '❌ PROXY6 API ключ не настроен.', {
-            reply_markup: getMainKeyboard()
-        });
-    }
-    
-    await bot.sendMessage(userId, '🛒 Покупаем прокси...');
-    
-    const buyResult = await buyProxy6Proxies(30, 7, 'ru', 4, 'http');
-    
-    if (!buyResult.success) {
-        clearUserState(userId);
-        return bot.sendMessage(userId, `❌ Ошибка покупки прокси: ${buyResult.error}`, {
-            reply_markup: getMainKeyboard()
-        });
-    }
-    
-    // Добавляем прокси к клиенту
-    let addedCount = 0;
-    for (const proxy of buyResult.proxies) {
-        const addResult = await addProxyToClient(clientName.trim(), proxy);
-        if (addResult.success) {
-            addedCount++;
-        }
-    }
-    
-    await bot.sendMessage(userId, 
-        `✅ Покупка завершена!\n\n` +
-        `🛒 Заказ: ${buyResult.orderId}\n` +
-        `💰 Цена: ${buyResult.price} RUB\n` +
-        `📦 Куплено: ${buyResult.proxies.length} прокси\n` +
-        `➕ Добавлено к "${clientName}": ${addedCount} прокси`,
-        { reply_markup: getMainKeyboard() }
-    );
-    
-    clearUserState(userId);
-}
-
-// Функции управления админами
-async function handleAdminManagement(userId) {
-    await bot.sendMessage(userId, '👥 Управление админами:', {
-        reply_markup: getAdminKeyboard()
-    });
-}
-
-async function handleAddAdminStart(userId) {
-    userStates[userId] = { action: 'add_admin' };
-    await saveUserStates();
-    
-    await bot.sendMessage(userId, '➕ Введите ID пользователя для добавления в админы:\n\n💡 Или используйте команду: +123456789');
-}
-
-async function handleAddAdmin(userId, adminIdText) {
-    const adminId = parseInt(adminIdText.trim());
-    
-    if (isNaN(adminId)) {
-        return bot.sendMessage(userId, '❌ Неверный формат ID. Введите числовой ID пользователя:');
-    }
-    
-    if (admins.hasOwnProperty(adminId.toString())) {
-        clearUserState(userId);
-        return bot.sendMessage(userId, '❌ Этот пользователь уже является админом.', {
-            reply_markup: getAdminKeyboard()
-        });
-    }
-    
-    admins[adminId.toString()] = {
-        id: adminId,
-        addedBy: userId,
-        addedAt: new Date().toISOString()
-    };
-    
-    await saveAdmins();
-    
-    clearUserState(userId);
-    
-    await bot.sendMessage(userId, `✅ Админ ${adminId} успешно добавлен!`, {
-        reply_markup: getAdminKeyboard()
-    });
-}
-
-async function handleDeleteAdminStart(userId) {
-    const adminIds = Object.keys(admins);
-    
-    if (adminIds.length === 0) {
-        return bot.sendMessage(userId, '📭 Нет админов для удаления.');
-    }
-    
-    userStates[userId] = { action: 'delete_admin' };
-    await saveUserStates();
-    
-    let message = '➖ Выберите админа для удаления (введите ID):\n\n';
-    adminIds.forEach(id => {
-        const admin = admins[id];
-        message += `👤 ${id} (добавлен ${new Date(admin.addedAt).toLocaleDateString()})\n`;
-    });
-    
-    message += '\n💡 Или используйте команду: -123456789';
-    
-    await bot.sendMessage(userId, message);
-}
-
-async function handleDeleteAdmin(userId, adminIdText) {
-    const adminId = parseInt(adminIdText.trim());
-    
-    if (isNaN(adminId)) {
-        return bot.sendMessage(userId, '❌ Неверный формат ID. Введите числовой ID админа:');
-    }
-    
-    if (adminId === SUPER_ADMIN_ID) {
-        clearUserState(userId);
-        return bot.sendMessage(userId, '❌ Нельзя удалить супер-админа.', {
-            reply_markup: getAdminKeyboard()
-        });
-    }
-    
-    if (!admins.hasOwnProperty(adminId.toString())) {
-        clearUserState(userId);
-        return bot.sendMessage(userId, '❌ Этот пользователь не является админом.', {
-            reply_markup: getAdminKeyboard()
-        });
-    }
-    
-    delete admins[adminId.toString()];
-    await saveAdmins();
-    
-    clearUserState(userId);
-    
-    await bot.sendMessage(userId, `✅ Админ ${adminId} успешно удален!`, {
-        reply_markup: getAdminKeyboard()
-    });
-}
-
-async function handleListAdmins(userId) {
-    const adminIds = Object.keys(admins);
-    
-    let message = `👥 Список админов:\n\n`;
-    message += `👑 ${SUPER_ADMIN_ID} (Супер-админ)\n\n`;
-    
-    if (adminIds.length === 0) {
-        message += '📭 Нет обычных админов.';
-    } else {
-        adminIds.forEach(id => {
-            const admin = admins[id];
-            message += `👤 ${id}\n`;
-            message += `   📅 Добавлен: ${new Date(admin.addedAt).toLocaleDateString()}\n`;
-            message += `   👤 Кем: ${admin.addedBy}\n\n`;
-        });
-    }
-    
-    message += `\n💡 Для быстрого управления используйте:\n`;
-    message += `➕ +123456789 - добавить админа\n`;
-    message += `➖ -123456789 - удалить админа`;
-    
-    await bot.sendMessage(userId, message);
-}
-
-// Обработка ошибок
-bot.on('polling_error', (error) => {
-    console.error('❌ Polling error:', error.message);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
-});
-
-// Запуск бота
-async function startBot() {
-    try {
-        await loadAdmins();
-        await loadUserStates();
-        
-        console.log('🤖 Telegram Bot запущен!');
-        console.log(`👑 Супер-админ: ${SUPER_ADMIN_ID}`);
-        console.log(`🔧 Railway Proxy URL: ${RAILWAY_PROXY_URL}`);
-        console.log(`🔑 PROXY6 API: ${PROXY6_API_KEY ? 'настроен' : 'не настроен'}`);
-        console.log(`👥 Админов загружено: ${Object.keys(admins).length}`);
-        
-        // Отправляем уведомление супер-админу о запуске
-        if (SUPER_ADMIN_ID) {
-            try {
-                await bot.sendMessage(SUPER_ADMIN_ID, 
-                    `🤖 Бот успешно запущен!\n\n` +
-                    `⚡ Все системы работают\n` +
-                    `👥 Админов: ${Object.keys(admins).length}\n` +
-                    `🔑 PROXY6: ${PROXY6_API_KEY ? '✅' : '❌'}\n\n` +
-                    `💡 Управление админами:\n` +
-                    `➕ +123456789 - добавить\n` +
-                    `➖ -123456789 - удалить`
-                );
-            } catch (error) {
-                console.log('⚠️ Не удалось отправить уведомление супер-админу');
-            }
-        }
-        
-    } catch (error) {
-        console.error('❌ Ошибка запуска бота:', error);
-        process.exit(1);
-    }
-}
-
-startBot();
