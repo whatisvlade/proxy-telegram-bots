@@ -12,7 +12,7 @@ const PROXY_SERVER_URL = process.env.PROXY_SERVER_URL || 'https://railway-proxy-
 const PROXY6_CONFIG = {
     API_KEY: process.env.PROXY6_API_KEY,
     BASE_URL: 'https://px6.link/api',
-    DEFAULT_COUNT: 30,
+    DEFAULT_COUNT: 25,
     DEFAULT_PERIOD: 7,
     DEFAULT_COUNTRY: 'ru',
     DEFAULT_VERSION: 3 // IPv4 Shared
@@ -192,8 +192,6 @@ async function proxy6Request(method, params = {}) {
         const queryParams = new URLSearchParams(params).toString();
         const url = `${PROXY6_CONFIG.BASE_URL}/${PROXY6_CONFIG.API_KEY}/${method}${queryParams ? '?' + queryParams : ''}`;
 
-        // console.log(`🌐 PROXY6 запрос: ${url}`); // Убираем для уменьшения логов
-
         const response = await axios.get(url, {
             timeout: 10000,
             headers: {
@@ -201,7 +199,6 @@ async function proxy6Request(method, params = {}) {
             }
         });
 
-        // console.log(`📥 PROXY6 ответ:`, response.data); // Убираем для уменьшения логов
         return response.data;
     } catch (error) {
         console.error('❌ Ошибка PROXY6 запроса:', error.message);
@@ -289,7 +286,7 @@ async function makeProxyServerRequest(endpoint, method = 'GET', data = null, aut
         if (data) console.log('📤 Данные:', data);
 
         const response = await axios(config);
-        console.log('📥 Ответ сервера:', response.data);
+        console.log('✅ Успешный ответ сервера');
         return response.data;
     } catch (error) {
         console.error('❌ Ошибка запроса к прокси серверу:', error.message);
@@ -297,6 +294,29 @@ async function makeProxyServerRequest(endpoint, method = 'GET', data = null, aut
             console.error('📥 Ответ с ошибкой:', error.response.data);
         }
         throw error;
+    }
+}
+
+// Исправленная функция удаления клиента
+async function deleteClientFromServer(clientName) {
+    try {
+        console.log(`🌐 Запрос к прокси серверу: DELETE ${PROXY_SERVER_URL}/api/delete-client/${clientName}`);
+        
+        const response = await axios.delete(`${PROXY_SERVER_URL}/api/delete-client/${clientName}`, {
+            timeout: 10000,
+            headers: {
+                'Accept': 'application/json'
+            }
+        });
+        
+        console.log('✅ Клиент успешно удален с сервера');
+        return { success: true, data: response.data };
+    } catch (error) {
+        console.error('❌ Ошибка удаления клиента с сервера:', error.message);
+        if (error.response) {
+            console.log('📥 Ответ с ошибкой:', error.response.data);
+        }
+        return { success: false, error: error.message };
     }
 }
 
@@ -363,24 +383,14 @@ bot.on('message', async (msg) => {
     const text = msg.text;
     const username = msg.from.username || 'Unknown';
 
-    console.log(`📨 ПОЛУЧЕНО СООБЩЕНИЕ:`);
-    console.log(`   От: ${msg.from.first_name} (@${username})`);
-    console.log(`   ID: ${userId}`);
-    console.log(`   Текст: "${text}"`);
-
     // Проверка авторизации
-    console.log(`🔍 Проверка авторизации: userId=${userId}, authorized=${isAuthorized(userId)}`);
     if (!isAuthorized(userId)) {
-        console.log(`   Авторизован: false`);
         await bot.sendMessage(chatId, '❌ У вас нет доступа к этому боту');
         return;
     }
-    console.log(`   Авторизован: true`);
 
     // Проверка супер-админа
     const superAdmin = isSuperAdmin(userId);
-    console.log(`👑 Проверка супер-админа: userId=${userId}, SUPER_ADMIN_ID=${SUPER_ADMIN_ID}, result=${superAdmin}`);
-    console.log(`   Роль: ${superAdmin ? 'Супер-админ' : 'Админ'}`);
 
     // Обработка команд и кнопок
     if (text === '/start') {
@@ -653,14 +663,9 @@ bot.on('message', async (msg) => {
 
         if (state.action === 'adding_client') {
             console.log('📦 Получен ответ для добавления клиента');
-            console.log(`📝 Длина сообщения: ${text.length} символов`);
 
             const lines = text.trim().split('\n');
-            console.log(`📋 Количество строк: ${lines.length}`);
-            console.log(`👤 Первая строка: "${lines[0]}"`);
-
             const parts = lines[0].trim().split(/\s+/);
-            console.log(`🔍 Части: [${parts.join(', ')}]`);
 
             if (parts.length < 2) {
                 await bot.sendMessage(chatId, '❌ Неверный формат. Используйте: логин пароль');
@@ -669,9 +674,6 @@ bot.on('message', async (msg) => {
 
             const clientName = parts[0];
             const password = parts[1];
-
-            console.log(`👤 Логин (clientName): ${clientName}`);
-            console.log(`🔐 Пароль: ${password}`);
 
             // Проверяем, существует ли клиент у этого админа
             const adminClients = getAdminClients(userId);
@@ -697,17 +699,12 @@ bot.on('message', async (msg) => {
                 proxies: []
             };
 
-            console.log(`🌐 Строк с прокси: 0`);
-
             // Автоматическая покупка прокси через PROXY6.net
             let proxyPurchaseMessage = '';
             if (PROXY6_CONFIG.API_KEY) {
                 console.log(`🛒 Автоматическая покупка прокси включена для клиента ${clientName}`);
 
                 try {
-                    console.log(`🛒 Покупаем прокси через PROXY6.net для клиента ${clientName}`);
-                    console.log(`📊 Параметры: count=${PROXY6_CONFIG.DEFAULT_COUNT}, period=${PROXY6_CONFIG.DEFAULT_PERIOD}, country=${PROXY6_CONFIG.DEFAULT_COUNTRY}, version=${PROXY6_CONFIG.DEFAULT_VERSION}`);
-
                     const purchaseResult = await buyProxy6Proxies(
                         PROXY6_CONFIG.DEFAULT_COUNT,
                         PROXY6_CONFIG.DEFAULT_PERIOD,
@@ -862,15 +859,18 @@ bot.on('callback_query', async (callbackQuery) => {
             return;
         }
 
-        // Удаляем клиента
+        // Удаляем клиента локально
         delete adminClients[clientName];
         saveClients();
 
-        // Удаляем с прокси сервера
+        // Удаляем с прокси сервера (исправленный запрос)
         try {
-            await makeProxyServerRequest('/api/remove-client', 'POST', {
-                name: clientName
-            });
+            const deleteResult = await deleteClientFromServer(clientName);
+            if (deleteResult.success) {
+                console.log('✅ Клиент успешно удален с прокси сервера');
+            } else {
+                console.error('❌ Ошибка удаления с сервера:', deleteResult.error);
+            }
         } catch (error) {
             console.error('❌ Ошибка удаления клиента с сервера:', error);
         }
@@ -1117,7 +1117,7 @@ bot.on('callback_query', async (callbackQuery) => {
 loadClients();
 loadAdmins();
 
-console.log('🚀 Telegram Bot запущен с мульти-админ системой и клавиатурой!');
+console.log('🚀 Telegram Bot запущен с исправленным API!');
 console.log(`👑 Супер-админ ID: ${SUPER_ADMIN_ID}`);
 console.log(`👥 Админов: ${admins.length}`);
 console.log(`🛒 PROXY6.net API: ${PROXY6_CONFIG.API_KEY ? '✅ Настроен' : '❌ Не настроен'}`);
