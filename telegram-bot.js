@@ -1149,6 +1149,3 @@ app.get('/health', (req, res) => {
 app.listen(PORT, () => {
     console.log(`🌐 Health endpoint доступен на порту ${PORT}`);
 });
-
-
-что нужно поменять ?
